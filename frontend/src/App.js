@@ -6,29 +6,45 @@ function App() {
   const [customActivity, setCustomActivity] = useState('');
   const [customPoints, setCustomPoints] = useState('');
   const [customEmoji, setCustomEmoji] = useState('');
+  const [customCategory, setCustomCategory] = useState('General');
   const [totalScore, setTotalScore] = useState(0);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('All');
+
+  // Available categories
+  const categories = [
+    'General',
+    'Transportation',
+    'Energy',
+    'Waste',
+    'Food',
+    'Water',
+    'Shopping',
+    'Home',
+    'Work',
+    'Recreation'
+  ];
 
   //predefined positive activities
   const [positiveActivities, setPositiveActivities] = useState([
-    { activity: "Walked instead of driving", points: 4, emoji: "🚶" },
-    { activity: "Used Bicycle", points: 5, emoji: "🚴" },
-    { activity: "Used Public Transport", points: 3, emoji: "🚌" },
-    { activity: "Recycled Waste", points: 3, emoji: "♻️" },
-    { activity: "Planted a Tree", points: 10, emoji: "🌱" },
-    { activity: "Used Reusable Bottle", points: 2, emoji: "💧" },
-    { activity: "Reduced Electricity Usage", points: 4, emoji: "💡" },
-    { activity: "Bought Local Produce", points: 2, emoji: "🥬" },
-    { activity: "Composted Kitchen Waste", points: 3, emoji: "🗂️" }
+    { activity: "Walked instead of driving", points: 4, emoji: "🚶", category: "Transportation" },
+    { activity: "Used Bicycle", points: 5, emoji: "🚴", category: "Transportation" },
+    { activity: "Used Public Transport", points: 3, emoji: "🚌", category: "Transportation" },
+    { activity: "Recycled Waste", points: 3, emoji: "♻️", category: "Waste" },
+    { activity: "Planted a Tree", points: 10, emoji: "🌱", category: "General" },
+    { activity: "Used Reusable Bottle", points: 2, emoji: "💧", category: "Water" },
+    { activity: "Reduced Electricity Usage", points: 4, emoji: "💡", category: "Energy" },
+    { activity: "Bought Local Produce", points: 2, emoji: "🥬", category: "Food" },
+    { activity: "Composted Kitchen Waste", points: 3, emoji: "🗂️", category: "Waste" }
   ]);
 
   // predefined negative activities
   const [negativeActivities, setNegativeActivities] = useState([
-    { activity: "Drove Car Alone", points: -5, emoji: "🚗" },
-    { activity: "Used Plastic Bags", points: -2, emoji: "🛍️" },
-    { activity: "Wasted Food", points: -3, emoji: "🗑️" },
-    { activity: "Left Lights/AC On", points: -4, emoji: "💡" },
-    { activity: "Took Short Flight (<500km)", points: -8, emoji: "✈️" },
-    { activity: "Used Disposable Bottles", points: -2, emoji: "🥤" }
+    { activity: "Drove Car Alone", points: -5, emoji: "🚗", category: "Transportation" },
+    { activity: "Used Plastic Bags", points: -2, emoji: "🛍️", category: "Shopping" },
+    { activity: "Wasted Food", points: -3, emoji: "🗑️", category: "Food" },
+    { activity: "Left Lights/AC On", points: -4, emoji: "💡", category: "Energy" },
+    { activity: "Took Short Flight (<500km)", points: -8, emoji: "✈️", category: "Transportation" },
+    { activity: "Used Disposable Bottles", points: -2, emoji: "🥤", category: "Water" }
   ]);
 
   // localstorage custom activities
@@ -49,6 +65,8 @@ function App() {
     axios.get('http://localhost:5000/api/activities')
       .then(res => {
         console.log('✅ Activities fetched:', res.data);
+        console.log('📥 Sample activity data:', res.data[0]);
+        console.log('📥 Categories in activities:', res.data.map(a => ({ id: a._id, category: a.category, activity: a.activityName || a.activity })));
         setActivities(res.data);
         calculateScore(res.data);
       })
@@ -63,31 +81,45 @@ function App() {
   }, []);
 
   // add predefined activity
-  const logPredefined = async (activity, points) => {
+  const logPredefined = async (activity, points, category) => {
     try {
-      const payload = { activity, points };
-      console.log('📤 Sending:', payload);
+      const payload = { 
+        activity: activity, 
+        points: points,
+        category: category
+      };
+      console.log('📤 Sending predefined activity:', payload);
+      console.log('📤 Category being sent:', category);
       
-      await axios.post('http://localhost:5000/api/activities', payload);
-      console.log('✅ Activity added successfully');
+      const response = await axios.post('http://localhost:5000/api/activities', payload);
+      console.log('✅ Predefined activity added successfully');
+      console.log('📥 Response from server:', response.data);
       fetchActivities();
     } catch (err) {
-      console.error('❌ Error adding activity:', err);
+      console.error('❌ Error adding predefined activity:', err);
       alert("Error adding activity: " + (err.response?.data?.error || err.message));
     }
   };
 
-  // add custom activity and optionally save as predefined
+
+
+  // add custom activity and option to save as predefined
   const handleCustomSubmit = async (e) => {
     e.preventDefault();
     if (!customActivity || !customPoints) return alert("Please fill all fields");
 
     try {
-      const payload = { activity: customActivity, points: parseInt(customPoints) };
+      const payload = { 
+        activity: customActivity, 
+        points: parseInt(customPoints),
+        category: customCategory
+      };
       console.log('📤 Sending custom activity:', payload);
+      console.log('📤 Custom category being sent:', customCategory);
       
-      await axios.post('http://localhost:5000/api/activities', payload);
+      const response = await axios.post('http://localhost:5000/api/activities', payload);
       console.log('✅ Custom activity added successfully');
+      console.log('📥 Response from server:', response.data);
       
       // Ask user if they want to save this as a predefined activity
       const shouldSave = window.confirm(
@@ -99,6 +131,7 @@ function App() {
           activity: customActivity,
           points: parseInt(customPoints),
           emoji: customEmoji || (parseInt(customPoints) > 0 ? '✨' : '⚠️'),
+          category: customCategory,
           isCustom: true
         };
         
@@ -124,6 +157,7 @@ function App() {
       setCustomActivity('');
       setCustomPoints('');
       setCustomEmoji('');
+      setCustomCategory('General');
       fetchActivities();
     } catch (err) {
       console.error('❌ Error adding custom activity:', err);
@@ -173,7 +207,7 @@ function App() {
   };
 
   // Activity box component
-  const ActivityBox = ({ activity, points, emoji, isCustom, isPositive, onClick, onRemove }) => (
+  const ActivityBox = ({ activity, points, emoji, category, isCustom, isPositive, onClick, onRemove }) => (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
         onClick={() => onClick(activity, points)}
@@ -218,10 +252,24 @@ function App() {
         <div style={{ 
           fontSize: '11px', 
           lineHeight: '1.2',
-          marginBottom: '6px',
+          marginBottom: '4px',
           textShadow: '0 1px 2px rgba(0,0,0,0.3)'
         }}>
           {activity}
+        </div>
+        <div style={{ 
+          fontSize: '9px', 
+          color: 'rgba(255,255,255,0.9)',
+          marginBottom: '4px',
+          textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+          backgroundColor: 'rgba(255,255,255,0.15)',
+          padding: '1px 6px',
+          borderRadius: '8px',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+          fontWeight: 'bold'
+        }}>
+          {category || 'General'}
         </div>
         <div style={{ 
           fontSize: '14px', 
@@ -319,9 +367,10 @@ function App() {
               activity={p.activity}
               points={p.points}
               emoji={p.emoji}
+              category={p.category}
               isCustom={p.isCustom}
               isPositive={true}
-              onClick={logPredefined}
+              onClick={() => logPredefined(p.activity, p.points, p.category)}
               onRemove={() => removeCustomActivity(p, true)}
             />
           ))}
@@ -351,9 +400,10 @@ function App() {
               activity={n.activity}
               points={n.points}
               emoji={n.emoji}
+              category={n.category}
               isCustom={n.isCustom}
               isPositive={false}
-              onClick={logPredefined}
+              onClick={() => logPredefined(n.activity, n.points, n.category)}
               onRemove={() => removeCustomActivity(n, false)}
             />
           ))}
@@ -419,6 +469,28 @@ function App() {
           
           <div style={{ flex: '1', minWidth: '100px' }}>
             <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
+              Category
+            </label>
+            <select
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              style={{ 
+                width: '100%', 
+                padding: '12px', 
+                border: '2px solid #ddd', 
+                borderRadius: '8px',
+                fontSize: '14px',
+                boxSizing: 'border-box'
+              }}
+            >
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ flex: '1', minWidth: '100px' }}>
+            <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
               Emoji (optional)
             </label>
             <input
@@ -478,6 +550,40 @@ function App() {
         }}>
           📋 Activity Log
         </h2>
+        
+        {/* Category Filter */}
+        <div style={{ 
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          flexWrap: 'wrap'
+        }}>
+          <span style={{ color: '#555', fontSize: '14px' }}>Filter by category:</span>
+          <select
+            value={selectedCategoryFilter}
+            onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+            style={{ 
+              padding: '8px 12px', 
+              border: '2px solid #ddd', 
+              borderRadius: '6px',
+              fontSize: '14px',
+              backgroundColor: 'white'
+            }}
+          >
+            <option value="All">All Categories</option>
+            {categories.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+          <span style={{ 
+            color: '#666', 
+            fontSize: '12px',
+            marginLeft: 'auto'
+          }}>
+            Showing {activities.filter(a => selectedCategoryFilter === 'All' || a.category === selectedCategoryFilter).length} of {activities.length} activities
+          </span>
+        </div>
         {activities.length === 0 ? (
           <div style={{
             textAlign: 'center',
@@ -493,7 +599,9 @@ function App() {
           </div>
         ) : (
           <ul style={{ listStyle: 'none', padding: 0 }}>
-            {activities.map((a) => (
+            {activities
+              .filter(a => selectedCategoryFilter === 'All' || a.category === selectedCategoryFilter)
+              .map((a) => (
               <li key={a._id} style={{
                 background: a.points >= 0 ? 'linear-gradient(135deg, #e8f5e8, #d4edda)' : 'linear-gradient(135deg, #f8d7da, #f5c6cb)',
                 color: a.points >= 0 ? '#2c3e50' : '#721c24',
@@ -526,11 +634,26 @@ function App() {
                       {a.points >= 0 ? `+${a.points}` : `${a.points}`} points
                     </span>
                   </div>
-                  <small style={{ color: '#666', fontSize: '12px' }}>
-                    📅 {new Date(a.date).toLocaleString()}
-                    {a.type && ` • ${a.type}`}
-                    {a.category && ` • ${a.category}`}
-                  </small>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                    <small style={{ color: '#666', fontSize: '12px' }}>
+                      📅 {new Date(a.date).toLocaleString()}
+                      {a.type && ` • ${a.type}`}
+                    </small>
+                    {a.category && (
+                      <span style={{
+                        backgroundColor: a.points >= 0 ? '#27ae60' : '#c0392b',
+                        color: 'white',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        🏷️ {a.category}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <button 
                   onClick={() => handleDelete(a._id)}
@@ -555,6 +678,8 @@ function App() {
           </ul>
         )}
       </div>
+
+
     </div>
   );
 }

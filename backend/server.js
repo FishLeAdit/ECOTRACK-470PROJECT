@@ -30,6 +30,17 @@ app.get('/api/activities', async (req, res) => {
     console.log('📖 Fetching activities...');
     const activities = await Activity.find().sort({ date: -1 });
     console.log(`Found ${activities.length} activities`);
+    
+    // Debug: Log categories for each activity
+    activities.forEach((activity, index) => {
+      console.log(`Activity ${index + 1}:`, {
+        id: activity._id,
+        name: activity.activityName,
+        category: activity.category,
+        hasCategory: !!activity.category
+      });
+    });
+    
     res.json(activities);
   } catch (err) {
     console.error('Error fetching activities:', err);
@@ -41,8 +52,14 @@ app.get('/api/activities', async (req, res) => {
 app.post('/api/activities', async (req, res) => {
   try {
     console.log('📝 Raw request body:', req.body);
+    console.log('📝 Category from request:', req.body.category);
+    console.log('📝 Category type:', typeof req.body.category);
+    console.log('📝 Category length:', req.body.category ? req.body.category.length : 'undefined');
     
-    const { activity, points } = req.body; // Original frontend format
+    const { activity, points, category } = req.body; // Updated to include category
+    console.log('📝 Destructured category:', category);
+    console.log('📝 Destructured category type:', typeof category);
+    console.log('📝 Destructured category truthy check:', !!category);
     
     // Validation
     if (!activity || points === undefined || points === null) {
@@ -59,10 +76,17 @@ app.post('/api/activities', async (req, res) => {
       activityName: activity.trim(),
       type: points > 0 ? 'Positive' : 'Negative',
       points: parseInt(points),
-      category: 'General'
+      category: category !== undefined && category !== null ? category : 'General' // Use provided category or default to 'General'
     };
     
     console.log('📝 Mapped activity data:', activityData);
+    console.log('📝 Final category value:', activityData.category);
+    console.log('📝 Category assignment logic:', {
+      category,
+      isUndefined: category === undefined,
+      isNull: category === null,
+      finalCategory: category !== undefined && category !== null ? category : 'General'
+    });
 
     const newActivity = new Activity(activityData);
     const savedActivity = await newActivity.save();
@@ -98,6 +122,70 @@ app.delete('/api/activities/:id', async (req, res) => {
       error: 'Failed to delete activity', 
       details: err.message 
     });
+  }
+});
+
+// Debug route: Check database schema and update existing activities
+app.get('/api/debug/activities', async (req, res) => {
+  try {
+    console.log('🔍 Debug: Checking database schema...');
+    
+    // Check if activities have category field
+    const activities = await Activity.find();
+    const activitiesWithoutCategory = activities.filter(a => !a.category);
+    const activitiesWithCategory = activities.filter(a => a.category);
+    
+    console.log(`📊 Total activities: ${activities.length}`);
+    console.log(`📊 Activities without category: ${activitiesWithoutCategory.length}`);
+    console.log(`📊 Activities with category: ${activitiesWithCategory.length}`);
+    
+    if (activitiesWithoutCategory.length > 0) {
+      console.log('📝 Sample activities without category:', activitiesWithoutCategory.slice(0, 3));
+    }
+    
+    res.json({
+      totalActivities: activities.length,
+      activitiesWithoutCategory: activitiesWithoutCategory.length,
+      activitiesWithCategory: activitiesWithCategory.length,
+      sampleWithoutCategory: activitiesWithoutCategory.slice(0, 3),
+      sampleWithCategory: activitiesWithCategory.slice(0, 3)
+    });
+    
+  } catch (err) {
+    console.error('❌ Debug error:', err);
+    res.status(500).json({ error: 'Debug failed', details: err.message });
+  }
+});
+
+// Route to update existing activities without categories
+app.post('/api/update-categories', async (req, res) => {
+  try {
+    console.log('🔄 Updating activities without categories...');
+    
+    // Find activities without categories
+    const activitiesWithoutCategory = await Activity.find({ category: { $exists: false } });
+    console.log(`📊 Found ${activitiesWithoutCategory.length} activities without categories`);
+    
+    if (activitiesWithoutCategory.length === 0) {
+      return res.json({ message: 'All activities already have categories' });
+    }
+    
+    // Update all activities without categories to have 'General' category
+    const updateResult = await Activity.updateMany(
+      { category: { $exists: false } },
+      { $set: { category: 'General' } }
+    );
+    
+    console.log(`✅ Updated ${updateResult.modifiedCount} activities with 'General' category`);
+    
+    res.json({
+      message: `Updated ${updateResult.modifiedCount} activities with 'General' category`,
+      updatedCount: updateResult.modifiedCount
+    });
+    
+  } catch (err) {
+    console.error('❌ Error updating categories:', err);
+    res.status(500).json({ error: 'Failed to update categories', details: err.message });
   }
 });
 
