@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const Activity = require("../models/Activity");
+const Activity = require("../models/activity");
+const BadgeService = require ("../services/badgeService")
 
 // GET all activities for a user
 router.get("/:userId", async (req, res) => {
@@ -17,7 +18,11 @@ router.post("/", async (req, res) => {
   try {
     const newActivity = new Activity(req.body);
     await newActivity.save();
-    res.json(newActivity);
+    const result = await BadgeService.updateUserStats(req.body.userId || 'default_user', newActivity);
+    res.json({
+      activity: newActivity,
+      newBadges: result.newBadges,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

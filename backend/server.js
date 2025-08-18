@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const Activity = require('./models/Activity'); // import model
+const Activity = require('./models/activity'); // import model
+const Goal = require('./models/goal'); // import goal model
+const Badge = require('./models/badge');
+const UserStats = require('./models/userStats');
+const BadgeService = require('./services/badgeService');
 
 const app = express();
 
@@ -51,55 +55,27 @@ app.get('/api/activities', async (req, res) => {
 // POST: add a new activity - FIXED to work with original frontend
 app.post('/api/activities', async (req, res) => {
   try {
-    console.log('📝 Raw request body:', req.body);
-    console.log('📝 Category from request:', req.body.category);
-    console.log('📝 Category type:', typeof req.body.category);
-    console.log('📝 Category length:', req.body.category ? req.body.category.length : 'undefined');
-    
-    const { activity, points, category } = req.body; // Updated to include category
-    console.log('📝 Destructured category:', category);
-    console.log('📝 Destructured category type:', typeof category);
-    console.log('📝 Destructured category truthy check:', !!category);
-    
-    // Validation
-    if (!activity || points === undefined || points === null) {
-      console.log('❌ Validation failed - missing fields');
-      return res.status(400).json({ 
-        error: 'Missing required fields', 
-        details: 'Activity name and points are required' 
-      });
+    const { userId, activityName, points, category, type } = req.body;
+    if (!activityName || points === undefined || points === null) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Map to your database schema
-    const activityData = {
-      userId: 'default_user', // Default user for now
-      activityName: activity.trim(),
-      type: points > 0 ? 'Positive' : 'Negative',
-      points: parseInt(points),
-      category: category !== undefined && category !== null ? category : 'General' // Use provided category or default to 'General'
-    };
-    
-    console.log('📝 Mapped activity data:', activityData);
-    console.log('📝 Final category value:', activityData.category);
-    console.log('📝 Category assignment logic:', {
+    const newActivity = new Activity({
+      userId,
+      activityName,
+      points,
       category,
-      isUndefined: category === undefined,
-      isNull: category === null,
-      finalCategory: category !== undefined && category !== null ? category : 'General'
+      type,
+      date: new Date()
     });
+    await newActivity.save();
 
-    const newActivity = new Activity(activityData);
-    const savedActivity = await newActivity.save();
-    
-    console.log('✅ Activity saved successfully:', savedActivity);
-    res.status(201).json(savedActivity);
-    
+    // Check for new badges
+    const newBadges = await BadgeService.checkAndAwardBadges(userId);
+
+    res.json({ activity: newActivity, newBadges });
   } catch (err) {
-    console.error('❌ Error adding activity:', err);
-    res.status(400).json({ 
-      error: 'Failed to add activity', 
-      details: err.message 
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -189,7 +165,250 @@ app.post('/api/update-categories', async (req, res) => {
   }
 });
 
-// Error handling middleware
+// Goal routes
+// Create a new goal
+app.post('/api/goals', async (req, res) => {
+  try {
+    console.log('🎯 Creating new goal:', req.body);
+    const { userId, targetPoints, endDate, goalType } = req.body;
+    
+    if (!userId || !targetPoints || !endDate || !goalType) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const goal = new Goal({ 
+      userId, 
+      targetPoints: parseInt(targetPoints), 
+      endDate: new Date(endDate),
+      goalType,
+      currentPoints: 0
+    });
+    
+    await goal.save();
+    
+    // Update stats for goal creation and check for badges
+    try {
+      const { newBadges } = await BadgeService.updateStatsOnGoalCreation(userId);
+      console.log('✅ Goal created successfully with badges check');
+      res.status(201).json({ goal, newBadges: newBadges || [] });
+    } catch (statsError) {
+      console.log('⚠️ Stats update failed (non-critical):', statsError.message);
+      res.status(201).json({ goal, newBadges: [] });
+    }
+    
+  } catch (err) {
+    console.error('❌ Error creating goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Function to automatically refresh goals based on their type
+const refreshGoalsAutomatically = async () => {
+  try {
+    const now = new Date();
+    const userGoals = await Goal.find({ 
+      userId: 'default_user',
+      endDate: { $gte: now },
+      isArchived: false
+    });
+    
+    for (const goal of userGoals) {
+      const goalStart = goal.startDate;
+      const goalEnd = goal.endDate;
+      
+      // Check if goal period has ended and needs refresh
+      if (now > goalEnd) {
+        // Archive the completed goal first
+        goal.isCompleted = true;
+        goal.completionDate = goalEnd;
+        goal.wasSuccessful = goal.currentPoints >= goal.targetPoints;
+        goal.isArchived = true;
+        await goal.save();
+        
+        // Award badges for goal completion if successful
+        if (goal.wasSuccessful) {
+          try {
+            await BadgeService.updateStatsOnGoalCompletion(goal.userId);
+            console.log(`🏆 Badge check completed for successful goal: ${goal._id}`);
+          } catch (badgeError) {
+            console.log('⚠️ Badge update failed (non-critical):', badgeError.message);
+          }
+        }
+        
+        console.log(`📚 Archived ${goal.goalType} goal ${goal._id} - ${goal.wasSuccessful ? 'SUCCESS' : 'FAILED'} (${goal.currentPoints}/${goal.targetPoints})`);
+        
+        // Create new period based on goal type
+        let newStartDate, newEndDate;
+        
+        switch (goal.goalType) {
+          case 'daily':
+            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            newEndDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+            break;
+          case 'weekly':
+            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            newEndDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+            break;
+          case 'monthly':
+            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            newEndDate = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+            break;
+          default:
+            continue;
+        }
+        
+        // Create new goal for the next period
+        const newGoal = new Goal({
+          userId: goal.userId,
+          targetPoints: goal.targetPoints,
+          startDate: newStartDate,
+          endDate: newEndDate,
+          currentPoints: 0,
+          goalType: goal.goalType,
+          isCompleted: false,
+          isArchived: false
+        });
+        
+        await newGoal.save();
+        console.log(`🔄 Created new ${goal.goalType} goal ${newGoal._id} for period: ${newStartDate.toDateString()} to ${newEndDate.toDateString()}`);
+      } else {
+        // Goal is still active, calculate current progress
+        const periodActivities = await Activity.find({
+          userId: goal.userId,
+          date: { $gte: goalStart, $lte: goalEnd }
+        });
+        
+        const totalPoints = periodActivities.reduce((sum, act) => sum + act.points, 0);
+        
+                // Update goal progress
+                if (goal.currentPoints !== totalPoints) {
+                  goal.currentPoints = totalPoints;
+                  await goal.save();
+                  console.log(`🎯 Updated goal ${goal._id} progress to ${totalPoints}/${goal.targetPoints} points`);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('❌ Error in refreshGoalsAutomatically:', err);
+          }
+        };
+
+// Get all goals for a user
+app.get('/api/goals/:userId', async (req, res) => {
+  try {
+    console.log('📖 Fetching goals for user:', req.params.userId);
+    
+    // Auto-refresh goals before fetching
+    await refreshGoalsAutomatically();
+    
+    const goals = await Goal.find({ 
+      userId: req.params.userId,
+      isArchived: false 
+    }).sort({ startDate: -1 });
+    console.log(`Found ${goals.length} active goals`);
+    res.json(goals);
+  } catch (err) {
+    console.error('❌ Error fetching goals:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get goal history for a user
+app.get('/api/goals/:userId/history', async (req, res) => {
+  try {
+    console.log('📚 Fetching goal history for user:', req.params.userId);
+    
+    const goalHistory = await Goal.find({ 
+      userId: req.params.userId,
+      isArchived: true 
+    }).sort({ completionDate: -1 });
+    
+    console.log(`Found ${goalHistory.length} archived goals`);
+    res.json(goalHistory);
+  } catch (err) {
+    console.error('❌ Error fetching goal history:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get user badges
+app.get('/api/badges/:userId', async (req, res) => {
+  try {
+    console.log('🏆 Fetching badges for user:', req.params.userId);
+    const badges = await BadgeService.getUserBadges(req.params.userId);
+    console.log(`Found ${badges.length} badges`);
+    res.json(badges);
+  } catch (err) {
+    console.error('❌ Error fetching badges:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get user stats
+app.get('/api/stats/:userId', async (req, res) => {
+  try {
+    console.log('📊 Fetching stats for user:', req.params.userId);
+    const userStats = await BadgeService.getUserStats(req.params.userId);
+    console.log('Stats fetched successfully');
+    res.json(userStats);
+  } catch (err) {
+    console.error('❌ Error fetching stats:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get badge leaderboard
+app.get('/api/leaderboard/badges', async (req, res) => {
+  try {
+    console.log('🏅 Fetching badge leaderboard');
+    const leaderboard = await BadgeService.getBadgeLeaderboard();
+    res.json(leaderboard);
+  } catch (err) {
+    console.error('❌ Error fetching leaderboard:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update goal progress
+app.put('/api/goals/:id', async (req, res) => {
+  try {
+    console.log('🔄 Updating goal progress:', req.params.id, req.body);
+    const goal = await Goal.findById(req.params.id);
+    
+    if (!goal) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
+
+    goal.currentPoints = req.body.currentPoints || goal.currentPoints;
+    await goal.save();
+    
+    console.log('✅ Goal updated successfully:', goal);
+    res.json(goal);
+  } catch (err) {
+    console.error('❌ Error updating goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a goal
+app.delete('/api/goals/:id', async (req, res) => {
+  try {
+    console.log('🗑️ Deleting goal:', req.params.id);
+    const deletedGoal = await Goal.findByIdAndDelete(req.params.id);
+    
+    if (!deletedGoal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    
+    console.log('✅ Goal deleted successfully');
+    res.json({ message: 'Goal deleted successfully' });
+  } catch (err) {
+    console.error('❌ Error deleting goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Error handling middleware - MUST be last
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -198,8 +417,41 @@ app.use((err, req, res, next) => {
   });
 });
 
+
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📱 Ready to accept requests from frontend`);
+  console.log(`🎯 Goal routes available:`);
+  console.log(`   POST /api/goals`);
+  console.log(`   GET /api/goals/:userId`);
+  console.log(`   GET /api/goals/:userId/history`);
+  console.log(`   PUT /api/goals/:id`);
+  console.log(`   DELETE /api/goals/:id`);
+  console.log(`🔄 Auto-refresh enabled for daily/weekly/monthly goals`);
+  console.log(`📚 Goal history tracking enabled`);
+});
+
+// Set up automatic goal refresh every hour
+setInterval(async () => {
+  try {
+    await refreshGoalsAutomatically();
+    console.log('🕐 Hourly goal refresh completed');
+  } catch (error) {
+    console.log('⚠️ Hourly goal refresh failed:', error.message);
+  }
+}, 60 * 60 * 1000); // Every hour (60 minutes * 60 seconds * 1000 milliseconds)
+
+const badgeRoutes = require('./routes/badgeRoutes');
+app.use('/api/badges', badgeRoutes);
+
+// GET: list activities by user ID
+app.get('/api/activities/:userId', async (req, res) => {
+  try {
+    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: -1 });
+    res.json(activities);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
+  }
 });
