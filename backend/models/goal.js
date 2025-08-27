@@ -11,6 +11,8 @@ const goalSchema = new mongoose.Schema({
   completionDate: { type: Date },
   wasSuccessful: { type: Boolean },
   isArchived: { type: Boolean, default: false }
+}, {
+  timestamps: true // Adds createdAt and updatedAt fields
 });
 
 module.exports = mongoose.model("Goal", goalSchema);

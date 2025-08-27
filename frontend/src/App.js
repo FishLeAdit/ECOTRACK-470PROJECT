@@ -19,13 +19,16 @@ function App() {
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [newGoal, setNewGoal] = useState({
     targetPoints: '',
-    goalType: 'daily'
+    goalType: 'daily',
+    endDate: getEndDateForGoalType('daily')
   });
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [currentPage, setCurrentPage] = useState('main');
   const [newBadges, setNewBadges] = useState([]);
   const [showBadgeNotification, setShowBadgeNotification] = useState(false);
   const [pinnedCustomActivities, setPinnedCustomActivities] = useState([]);
+  const [completedGoal, setCompletedGoal] = useState(null);
+  const [showGoalCompleteNotification, setShowGoalCompleteNotification] = useState(false);
 
   // Categories
   const categories = [
@@ -63,6 +66,19 @@ function App() {
     { activity: "Used Disposable Bottles", points: -2, emoji: "🥤", category: "Water" }
   ]);
 
+  // Helper to get end date based on goal type
+  function getEndDateForGoalType(goalType) {
+    const today = new Date();
+    if (goalType === 'daily') {
+      today.setDate(today.getDate() + 1);
+    } else if (goalType === 'weekly') {
+      today.setDate(today.getDate() + 7);
+    } else if (goalType === 'monthly') {
+      today.setMonth(today.getMonth() + 1);
+    }
+    return today.toISOString().split('T')[0];
+  }
+
   // Fetch data on component mount
   useEffect(() => {
     fetchActivities();
@@ -89,13 +105,15 @@ function App() {
 
   // Fetch goals from backend
   const fetchGoals = async () => {
-    try {
-      const response = await axios.get('http://localhost:5000/api/goals/default_user');
-      setGoals(response.data);
-    } catch (err) {
-      console.error('❌ Error fetching goals:', err);
-    }
+  try {
+    const response = await axios.get('http://localhost:5000/api/goals/default_user');
+    setGoals(response.data);
+  } catch (err) {
+    console.error('❌ Error fetching goals:', err);
+    // Add user-friendly error handling, e.g., alert('Failed to load goals');
+  }
   };
+
 
   // Log predefined activity
   const logPredefined = async (activity, points, category) => {
@@ -107,16 +125,14 @@ function App() {
         category: category,
         type: points > 0 ? 'Positive' : 'Negative'
       };
-      
       const response = await axios.post('http://localhost:5000/api/activities', payload);
-      
-      // Check for new badges
       if (response.data.newBadges && response.data.newBadges.length > 0) {
         setNewBadges(response.data.newBadges);
         setShowBadgeNotification(true);
       }
-      
-      fetchActivities();
+      await updateGoalsProgress(points);
+      await fetchActivities();
+      await fetchGoals();
     } catch (err) {
       console.error('❌ Error adding predefined activity:', err);
       alert("Error adding activity: " + (err.response?.data?.error || err.message));
@@ -127,7 +143,6 @@ function App() {
   const handleCustomSubmit = async (e) => {
     e.preventDefault();
     if (!customActivity || !customPoints) return alert("Please fill all fields");
-
     try {
       const payload = { 
         userId: 'default_user',
@@ -136,25 +151,61 @@ function App() {
         category: customCategory,
         type: parseInt(customPoints) > 0 ? 'Positive' : 'Negative'
       };
-      
       const response = await axios.post('http://localhost:5000/api/activities', payload);
-      
-      // Check for new badges
       if (response.data.newBadges && response.data.newBadges.length > 0) {
         setNewBadges(response.data.newBadges);
         setShowBadgeNotification(true);
       }
-      
+      await updateGoalsProgress(Number(customPoints));
+      await fetchActivities();
+      await fetchGoals();
       setCustomActivity('');
       setCustomPoints('');
       setCustomEmoji('');
       setCustomCategory('General');
-      fetchActivities();
     } catch (err) {
       console.error('❌ Error adding custom activity:', err);
       alert("Error adding custom activity: " + (err.response?.data?.error || err.message));
     }
   };
+
+  // Update all active goals' progress after activity is logged
+  // Update all active goals' progress after activity is logged
+// Update all active goals' progress after activity is logged
+const updateGoalsProgress = async (pointsEarned) => {
+  let completedGoal = null;
+  
+  try {
+    const response = await axios.get('http://localhost:5000/api/goals/default_user');
+    const updatedGoals = response.data;
+    setGoals(updatedGoals);
+    
+    for (const goal of updatedGoals) {
+      if (goal.isCompleted && !goal.isArchived) {
+        completedGoal = goal;
+        break;
+      }
+    }
+    
+    if (completedGoal) {
+      setCompletedGoal(completedGoal);
+      setShowGoalCompleteNotification(true);
+      setTimeout(async () => {
+        setShowGoalCompleteNotification(false);
+        setCompletedGoal(null);
+        try {
+          await axios.put(`http://localhost:5000/api/goals/${completedGoal._id}/archive`);
+          await fetchGoals();
+        } catch (archiveErr) {
+          console.error('❌ Error archiving goal:', archiveErr);
+          alert('Failed to archive goal: ' + (archiveErr.response?.data?.error || archiveErr.message));
+        }
+      }, 3500);
+    }
+  } catch (err) {
+    console.error('❌ Error updating goals progress:', err);
+  }
+};
 
   // Delete activity
   const handleDelete = async (id) => {
@@ -169,56 +220,26 @@ function App() {
 
   // Create new goal
   const createGoal = async (e) => {
-    e.preventDefault();
-    if (!newGoal.targetPoints) return alert("Please fill all fields");
-
-    try {
-      // Calculate end date based on goal type
-      let endDate;
-      const now = new Date();
-      
-      switch (newGoal.goalType) {
-        case 'daily':
-          endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-          break;
-        case 'weekly':
-          endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
-          break;
-        case 'monthly':
-          endDate = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
-          break;
-        default:
-          endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      }
-
-      const payload = {
-        userId: 'default_user',
-        targetPoints: parseInt(newGoal.targetPoints),
-        endDate: endDate.toISOString(),
-        goalType: newGoal.goalType
-      };
-
-      const response = await axios.post('http://localhost:5000/api/goals', payload);
-      
-      // Check for new badges
-      if (response.data.newBadges && response.data.newBadges.length > 0) {
-        setNewBadges(response.data.newBadges);
-        setShowBadgeNotification(true);
-      }
-      
-      setNewGoal({ targetPoints: '', goalType: 'daily' });
-      setShowGoalModal(false);
-      fetchGoals();
-    } catch (err) {
-      console.error('❌ Error creating goal:', err);
-      alert("Error creating goal: " + (err.response?.data?.error || err.message));
-    }
+  e.preventDefault();
+  try {
+    const response = await axios.post('http://localhost:5000/api/goals', {
+      userId: 'default_user',
+      targetPoints: newGoal.targetPoints,
+      endDate: newGoal.endDate,
+      goalType: newGoal.goalType
+    });
+    setShowGoalModal(false);
+    setNewGoal({ targetPoints: '', goalType: 'daily', endDate: getEndDateForGoalType('daily') });
+    await fetchGoals();
+  } catch (err) {
+    console.error('❌ Error creating goal:', err);
+    alert('Failed to create goal: ' + (err.response?.data?.error || err.message));
+  }
   };
 
   // Delete goal
   const deleteGoal = async (goalId) => {
     if (!window.confirm('Are you sure you want to delete this goal?')) return;
-
     try {
       await axios.delete(`http://localhost:5000/api/goals/${goalId}`);
       fetchGoals();
@@ -228,13 +249,21 @@ function App() {
     }
   };
 
-  // Pin a custom activity (fix: use correct property names)
+  // Function to refresh goals (call this when needed)
+  const refreshGoals = async () => {
+    try {
+      // This will trigger the backend's refreshGoalsAutomatically function
+      const response = await axios.get('http://localhost:5000/api/goals/default_user');
+      setGoals(response.data);
+    } catch (err) {
+      console.error('❌ Error refreshing goals:', err);
+    }
+  };
+
+  // Pin a custom activity
   const pinCustomActivity = (activityObj) => {
-    // Accept both activityName or activity for compatibility
     const name = activityObj.activityName || activityObj.activity;
-    // Prevent duplicates
     if (!pinnedCustomActivities.some(a => (a.activityName || a.activity) === name)) {
-      // Normalize object for pinned list
       setPinnedCustomActivities([
         ...pinnedCustomActivities,
         {
@@ -250,6 +279,16 @@ function App() {
   // Unpin a custom activity
   const unpinCustomActivity = (activityName) => {
     setPinnedCustomActivities(pinnedCustomActivities.filter(a => a.activityName !== activityName));
+  };
+
+  // When opening the modal, set the default end date for the default goal type
+  const openGoalModal = () => {
+    setShowGoalModal(true);
+    setNewGoal({
+      targetPoints: '',
+      goalType: 'daily',
+      endDate: getEndDateForGoalType('daily')
+    });
   };
 
   // Activity box component
@@ -287,7 +326,7 @@ function App() {
   );
 
   return (
-    <div style={{ maxWidth: 1000, margin: '40px auto', fontFamily: 'Arial, sans-serif', padding: '0 20px' }}>
+    <div style={{ maxWidth: 1000, width: '100%', margin: '40px auto', fontFamily: 'Arial, sans-serif', padding: '0 10px' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
         <button
@@ -304,12 +343,10 @@ function App() {
         >
           ☰
         </button>
-        
         <div style={{ textAlign: 'center', flex: 1 }}>
           <h1 style={{ margin: '0 0 10px 0', color: '#2c3e50' }}>🌍 EcoTrack</h1>
           <p style={{ margin: 0, color: '#7f8c8d' }}>Track your daily environmental impact</p>
         </div>
-        
         <div style={{ width: '50px' }}></div>
       </div>
 
@@ -445,13 +482,33 @@ function App() {
                 <label style={{ display: 'block', marginBottom: 6, color: '#555', fontSize: 14 }}>Goal Type</label>
                 <select
                   value={newGoal.goalType}
-                  onChange={e => setNewGoal({ ...newGoal, goalType: e.target.value })}
+                  onChange={e => {
+                    const type = e.target.value;
+                    setNewGoal({
+                      ...newGoal,
+                      goalType: type,
+                      endDate: getEndDateForGoalType(type)
+                    });
+                  }}
                   style={{ width: '100%', padding: 10, border: '2px solid #ddd', borderRadius: 8, fontSize: 15 }}
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', marginBottom: 6, color: '#555', fontSize: 14 }}>End Date</label>
+                <div style={{
+                  width: '100%',
+                  padding: 10,
+                  border: '2px solid #eee',
+                  borderRadius: 8,
+                  fontSize: 15,
+                  background: '#f8f9fa'
+                }}>
+                  {newGoal.endDate}
+                </div>
               </div>
               <button
                 type="submit"
@@ -477,8 +534,6 @@ function App() {
       {/* Page Content */}
       {currentPage === 'main' ? (
         <>
-          
-
           {/* Score Tracker */}
           <div style={{
             background: 'linear-gradient(135deg, #74b9ff, #0984e3)',
@@ -596,7 +651,6 @@ function App() {
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 />
               </div>
-              
               <div style={{ flex: '1', minWidth: '100px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Points
@@ -609,7 +663,6 @@ function App() {
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 />
               </div>
-              
               <div style={{ flex: '1', minWidth: '100px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Category
@@ -624,7 +677,6 @@ function App() {
                   ))}
                 </select>
               </div>
-
               <div style={{ flex: '1', minWidth: '100px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Emoji (optional)
@@ -638,7 +690,6 @@ function App() {
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px', textAlign: 'center' }}
                 />
               </div>
-              
               <button 
                 type="submit"
                 style={{ 
@@ -662,7 +713,7 @@ function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ color: '#2c3e50', margin: 0 }}>🎯 Goals & Progress</h2>
               <button
-                onClick={() => setShowGoalModal(true)}
+                onClick={openGoalModal}
                 style={{
                   padding: '10px 20px',
                   backgroundColor: '#e67e22',
@@ -677,100 +728,100 @@ function App() {
                 + Add Goal
               </button>
             </div>
-            {goals.length === 0 ? (
+            {goals.filter(goal => !goal.isArchived).length === 0 ? (
+  <div style={{
+    textAlign: 'center',
+    padding: '30px',
+    color: '#666',
+    backgroundColor: '#f8f9fa',
+    borderRadius: '12px',
+    border: '2px dashed #ddd'
+  }}>
+    <div style={{ fontSize: '36px', marginBottom: '15px' }}>🎯</div>
+    <p style={{ fontSize: '16px', marginBottom: '10px' }}>No active goals!</p>
+    <p style={{ fontSize: '14px' }}>Set daily, weekly, or monthly eco-point targets to track your progress.</p>
+  </div>
+) : (
+  <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+    {goals
+      .filter(goal => !goal.isArchived) // Only show non-archived goals
+      .map((goal) => {
+        const progress = Math.min((goal.currentPoints / goal.targetPoints) * 100, 100);
+        const isCompleted = goal.isCompleted;
+        const isExpired = new Date() > new Date(goal.endDate) && !isCompleted;
+        
+        return (
+          <div key={goal._id} style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+            border: `2px solid ${isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'}`
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+              <div>
+                <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50' }}>{goal.goalType} Goal</h3>
+                <p style={{ margin: '0', color: '#7f8c8d' }}>
+                  Due: {new Date(goal.endDate).toLocaleDateString()}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteGoal(goal._id)}
+                style={{
+                  padding: '5px 10px',
+                  backgroundColor: '#e74c3c',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🗑️
+              </button>
+            </div>
+            <div style={{ marginBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', color: '#555' }}>
+                  Progress: {goal.currentPoints} / {goal.targetPoints} points
+                </span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCompleted ? '#27ae60' : '#f39c12' }}>
+                  {Math.round(progress)}%
+                </span>
+              </div>
               <div style={{
-                textAlign: 'center',
-                padding: '30px',
-                color: '#666',
-                backgroundColor: '#f8f9fa',
-                borderRadius: '12px',
-                border: '2px dashed #ddd'
+                width: '100%',
+                height: '8px',
+                backgroundColor: '#ecf0f1',
+                borderRadius: '4px',
+                overflow: 'hidden'
               }}>
-                <div style={{ fontSize: '36px', marginBottom: '15px' }}>🎯</div>
-                <p style={{ fontSize: '16px', marginBottom: '10px' }}>No goals set yet!</p>
-                <p style={{ fontSize: '14px' }}>Set daily, weekly, or monthly eco-point targets to track your progress.</p>
+                <div style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  backgroundColor: isCompleted ? '#27ae60' : '#f39c12'
+                }} />
               </div>
-            ) : (
-              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
-                {goals.map((goal) => {
-                  const progress = Math.min((goal.currentPoints / goal.targetPoints) * 100, 100);
-                  const isCompleted = goal.currentPoints >= goal.targetPoints;
-                  const isExpired = new Date() > new Date(goal.endDate);
-                  
-                  return (
-                    <div key={goal._id} style={{
-                      backgroundColor: 'white',
-                      padding: '20px',
-                      borderRadius: '12px',
-                      boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-                      border: `2px solid ${isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'}`
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-                        <div>
-                          <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50' }}>{goal.goalType} Goal</h3>
-                          <p style={{ margin: '0', color: '#7f8c8d' }}>
-                            Due: {new Date(goal.endDate).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => deleteGoal(goal._id)}
-                          style={{
-                            padding: '5px 10px',
-                            backgroundColor: '#e74c3c',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '12px'
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-
-                      <div style={{ marginBottom: '15px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '14px', color: '#555' }}>
-                            Progress: {goal.currentPoints} / {goal.targetPoints} points
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCompleted ? '#27ae60' : '#f39c12' }}>
-                            {Math.round(progress)}%
-                          </span>
-                        </div>
-                        <div style={{
-                          width: '100%',
-                          height: '8px',
-                          backgroundColor: '#ecf0f1',
-                          borderRadius: '4px',
-                          overflow: 'hidden'
-                        }}>
-                          <div style={{
-                            width: `${progress}%`,
-                            height: '100%',
-                            backgroundColor: isCompleted ? '#27ae60' : '#f39c12'
-                          }} />
-                        </div>
-                      </div>
-
-                      <div style={{
-                        padding: '8px 12px',
-                        backgroundColor: isCompleted ? '#d5f4e6' : isExpired ? '#fadbd8' : '#fef9e7',
-                        borderRadius: '6px',
-                        textAlign: 'center'
-                      }}>
-                        <span style={{
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          color: isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'
-                        }}>
-                          {isCompleted ? '🎉 Goal Completed!' : isExpired ? '⏰ Goal Expired' : '🚀 In Progress'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            </div>
+            <div style={{
+              padding: '8px 12px',
+              backgroundColor: isCompleted ? '#d5f4e6' : isExpired ? '#fadbd8' : '#fef9e7',
+              borderRadius: '6px',
+              textAlign: 'center'
+            }}>
+              <span style={{
+                fontSize: '12px',
+                fontWeight: 'bold',
+                color: isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'
+              }}>
+                {isCompleted ? '🎉 Goal Completed!' : isExpired ? '⏰ Goal Expired' : '🚀 In Progress'}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+  </div>
+)}
           </div>
 
           {/* Badge Display */}
@@ -805,6 +856,29 @@ function App() {
             setNewBadges([]);
           }} 
         />
+      )}
+
+      {/* Goal Completion Notification */}
+      {showGoalCompleteNotification && completedGoal && (
+        <div style={{
+          position: 'fixed',
+          top: '30%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: '#27ae60',
+          color: 'white',
+          padding: '32px 40px',
+          borderRadius: '18px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          zIndex: 3000,
+          textAlign: 'center',
+          fontSize: '22px',
+          fontWeight: 'bold',
+          animation: 'fadeInScale 0.5s'
+        }}>
+          🎉 Congratulations!<br />
+          You completed your <span style={{ textTransform: 'capitalize' }}>{completedGoal.goalType}</span> goal of <b>{completedGoal.targetPoints} points</b>!
+        </div>
       )}
     </div>
   );

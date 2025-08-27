@@ -181,7 +181,8 @@ app.post('/api/goals', async (req, res) => {
       targetPoints: parseInt(targetPoints), 
       endDate: new Date(endDate),
       goalType,
-      currentPoints: 0
+      currentPoints: 0,
+      startDate: new Date()  // Explicitly set if needed
     });
     
     await goal.save();
@@ -203,95 +204,74 @@ app.post('/api/goals', async (req, res) => {
 });
 
 // Function to automatically refresh goals based on their type
-const refreshGoalsAutomatically = async () => {
+// Improved function to automatically refresh goals based on their type
+const refreshGoalsAutomatically = async (userId = 'default_user') => {  // Optional userId param for flexibility
   try {
-    const now = new Date();
-    const userGoals = await Goal.find({ 
-      userId: 'default_user',
-      endDate: { $gte: now },
-      isArchived: false
+    console.log(`🔄 Refreshing goals for user: ${userId}`);
+    
+    const goals = await Goal.find({ 
+      userId: userId, 
+      isArchived: false 
     });
     
-    for (const goal of userGoals) {
-      const goalStart = goal.startDate;
-      const goalEnd = goal.endDate;
+    const now = new Date();
+    
+    for (const goal of goals) {
+      // Calculate current points from activities in the period
+      const activities = await Activity.find({
+        userId: goal.userId,
+        date: { $gte: goal.startDate, $lt: now }  // Up to now, to avoid future activities
+      });
       
-      // Check if goal period has ended and needs refresh
-      if (now > goalEnd) {
-        // Archive the completed goal first
+      goal.currentPoints = activities.reduce((sum, act) => sum + act.points, 0);
+      
+      if (goal.currentPoints >= goal.targetPoints) {
         goal.isCompleted = true;
-        goal.completionDate = goalEnd;
-        goal.wasSuccessful = goal.currentPoints >= goal.targetPoints;
+        goal.wasSuccessful = true;
+        goal.completionDate = now;
+      } else if (now > new Date(goal.endDate)) {
+        // Expired without completion
+        goal.isCompleted = true;
+        goal.wasSuccessful = false;
+        goal.completionDate = now;
         goal.isArchived = true;
-        await goal.save();
         
-        // Award badges for goal completion if successful
-        if (goal.wasSuccessful) {
-          try {
-            await BadgeService.updateStatsOnGoalCompletion(goal.userId);
-            console.log(`🏆 Badge check completed for successful goal: ${goal._id}`);
-          } catch (badgeError) {
-            console.log('⚠️ Badge update failed (non-critical):', badgeError.message);
-          }
-        }
-        
-        console.log(`📚 Archived ${goal.goalType} goal ${goal._id} - ${goal.wasSuccessful ? 'SUCCESS' : 'FAILED'} (${goal.currentPoints}/${goal.targetPoints})`);
-        
-        // Create new period based on goal type
-        let newStartDate, newEndDate;
-        
+        // Create new goal
+        let newEndDate = new Date(now);
         switch (goal.goalType) {
           case 'daily':
-            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            newEndDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+            newEndDate.setDate(newEndDate.getDate() + 1);
             break;
           case 'weekly':
-            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            newEndDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+            newEndDate.setDate(newEndDate.getDate() + 7);
             break;
           case 'monthly':
-            newStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            newEndDate = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+            newEndDate.setMonth(newEndDate.getMonth() + 1);
             break;
-          default:
-            continue;
         }
         
-        // Create new goal for the next period
         const newGoal = new Goal({
           userId: goal.userId,
           targetPoints: goal.targetPoints,
-          startDate: newStartDate,
+          startDate: now,
           endDate: newEndDate,
-          currentPoints: 0,
           goalType: goal.goalType,
+          currentPoints: 0,
           isCompleted: false,
           isArchived: false
         });
-        
         await newGoal.save();
-        console.log(`🔄 Created new ${goal.goalType} goal ${newGoal._id} for period: ${newStartDate.toDateString()} to ${newEndDate.toDateString()}`);
-      } else {
-        // Goal is still active, calculate current progress
-        const periodActivities = await Activity.find({
-          userId: goal.userId,
-          date: { $gte: goalStart, $lte: goalEnd }
-        });
-        
-        const totalPoints = periodActivities.reduce((sum, act) => sum + act.points, 0);
-        
-                // Update goal progress
-                if (goal.currentPoints !== totalPoints) {
-                  goal.currentPoints = totalPoints;
-                  await goal.save();
-                  console.log(`🎯 Updated goal ${goal._id} progress to ${totalPoints}/${goal.targetPoints} points`);
-                }
-              }
-            }
-          } catch (err) {
-            console.error('❌ Error in refreshGoalsAutomatically:', err);
-          }
-        };
+        console.log(`🔄 Created new ${goal.goalType} goal for expired goal`);
+      }
+      
+      await goal.save();
+    }
+    
+    console.log('✅ Goals refreshed successfully');
+  } catch (err) {
+    console.error('❌ Error in automatic goal refresh:', err);
+  }
+};
 
 // Get all goals for a user
 app.get('/api/goals/:userId', async (req, res) => {
@@ -299,7 +279,7 @@ app.get('/api/goals/:userId', async (req, res) => {
     console.log('📖 Fetching goals for user:', req.params.userId);
     
     // Auto-refresh goals before fetching
-    await refreshGoalsAutomatically();
+    await refreshGoalsAutomatically(req.params.userId);
     
     const goals = await Goal.find({ 
       userId: req.params.userId,
@@ -408,6 +388,67 @@ app.delete('/api/goals/:id', async (req, res) => {
   }
 });
 
+// In server.js, add this new endpoint after the other goal routes
+
+app.put('/api/goals/:id/archive', async (req, res) => {
+  try {
+    console.log('📦 Archiving goal:', req.params.id);
+    const goal = await Goal.findById(req.params.id);
+    
+    if (!goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+
+    // Ensure it's completed before archiving
+    if (!goal.isCompleted) {
+      return res.status(400).json({ error: 'Goal is not completed' });
+    }
+
+    goal.isArchived = true;
+    goal.completionDate = goal.completionDate || new Date();
+    goal.wasSuccessful = true; // Since it's completed
+    await goal.save();
+
+    // Create a new goal for the next period starting now
+    const now = new Date();
+    let newEndDate = new Date();
+    
+    switch (goal.goalType) {
+      case 'daily':
+        newEndDate.setDate(newEndDate.getDate() + 1);
+        break;
+      case 'weekly':
+        newEndDate.setDate(newEndDate.getDate() + 7);
+        break;
+      case 'monthly':
+        newEndDate.setMonth(newEndDate.getMonth() + 1);
+        break;
+      default:
+        // If not a standard type, don't create new
+        return res.json({ message: 'Goal archived successfully', goal });
+    }
+
+    const newGoal = new Goal({
+      userId: goal.userId,
+      targetPoints: goal.targetPoints,
+      startDate: now,
+      endDate: newEndDate,
+      goalType: goal.goalType,
+      currentPoints: 0,
+      isCompleted: false,
+      isArchived: false
+    });
+    
+    await newGoal.save();
+    console.log(`🔄 Created new ${goal.goalType} goal after archiving`);
+
+    res.json({ message: 'Goal archived and new goal created', goal, newGoal });
+  } catch (err) {
+    console.error('❌ Error archiving goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Error handling middleware - MUST be last
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
@@ -436,12 +477,12 @@ app.listen(PORT, () => {
 // Set up automatic goal refresh every hour
 setInterval(async () => {
   try {
-    await refreshGoalsAutomatically();
+    await refreshGoalsAutomatically('default_user');
     console.log('🕐 Hourly goal refresh completed');
   } catch (error) {
     console.log('⚠️ Hourly goal refresh failed:', error.message);
   }
-}, 60 * 60 * 1000); // Every hour (60 minutes * 60 seconds * 1000 milliseconds)
+}, 60 * 60 * 1000);
 
 const badgeRoutes = require('./routes/badgeRoutes');
 app.use('/api/badges', badgeRoutes);

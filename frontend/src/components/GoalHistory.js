@@ -79,6 +79,21 @@ function GoalHistory({ onBack }) {
         <h1 style={{ margin: 0, color: '#2c3e50' }}>📚 Goal History</h1>
       </div>
 
+      <button 
+        onClick={fetchGoalHistory}
+        style={{
+          padding: '8px 16px',
+          backgroundColor: '#3498db',
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '14px'
+        }}
+      >
+        🔄 Refresh History
+      </button>
+
       {/* Filter Controls */}
       <div style={{ 
         marginBottom: '30px',
