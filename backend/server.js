@@ -1,21 +1,25 @@
+// --- DEPENDENCIES ---
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
+// --- MODELS ---
 const Activity = require('./models/activity');
 const Goal = require('./models/goal');
 const Badge = require('./models/badge');
 const UserStats = require('./models/userStats');
+const PinnedActivity = require('./models/pinnedActivity'); // Added from second file
+
+// --- SERVICES ---
 const BadgeService = require('./services/badgeService');
 
+// --- APP INITIALIZATION & MIDDLEWARE ---
 const app = express();
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB 
+// --- DATABASE CONNECTION ---
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ecotrack')
   .then(() => console.log('✅ MongoDB connected successfully'))
   .catch(err => {
@@ -23,152 +27,11 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ecotrack')
     process.exit(1);
   });
 
-// Test route
+// --- TEST & DEBUG ROUTES ---
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Backend is working!' });
 });
 
-// GET: list all activities (sorted by latest)
-app.get('/api/activities', async (req, res) => {
-  try {
-    console.log('📖 Fetching activities...');
-    const activities = await Activity.find().sort({ date: -1 });
-    console.log(`Found ${activities.length} activities`);
-    
-    activities.forEach((activity, index) => {
-      console.log(`Activity ${index + 1}:`, {
-        id: activity._id,
-        name: activity.activityName,
-        category: activity.category,
-        hasCategory: !!activity.category
-      });
-    });
-    
-    res.json(activities);
-  } catch (err) {
-    console.error('Error fetching activities:', err);
-    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
-  }
-});
-
-// GET: list activities by user ID
-app.get('/api/activities/:userId', async (req, res) => {
-  try {
-    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: -1 });
-    res.json(activities);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
-  }
-});
-
-// GET: list frequent activities for a user (more than 3 times in a day)
-app.get('/api/activities/:userId/frequent', async (req, res) => {
-  try {
-    console.log('📊 Fetching frequent activities for user:', req.params.userId);
-    
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const frequentActivities = await Activity.aggregate([
-      {
-        $match: {
-          userId: req.params.userId,
-          date: { $gte: startOfDay, $lte: endOfDay }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            activityName: "$activityName",
-            category: "$category",
-            points: "$points",
-            type: "$type",
-            emoji: "$emoji"
-          },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $match: {
-          count: { $gt: 3 }
-        }
-      },
-      {
-        $project: {
-          activityName: "$_id.activityName",
-          category: "$_id.category",
-          points: "$_id.points",
-          type: "$_id.type",
-          emoji: "$_id.emoji",
-          count: 1,
-          _id: 0
-        }
-      },
-      {
-        $sort: { count: -1 }
-      }
-    ]);
-
-    console.log(`Found ${frequentActivities.length} frequent activities`);
-    res.json(frequentActivities);
-  } catch (err) {
-    console.error('❌ Error fetching frequent activities:', err);
-    res.status(500).json({ error: 'Failed to fetch frequent activities', details: err.message });
-  }
-});
-
-// POST: add a new activity
-app.post('/api/activities', async (req, res) => {
-  try {
-    const { userId, activityName, points, category, type } = req.body;
-    if (!activityName || points === undefined || points === null) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const newActivity = new Activity({
-      userId,
-      activityName,
-      points,
-      category,
-      type,
-      date: new Date()
-    });
-    await newActivity.save();
-
-    // Check for new badges
-    const newBadges = await BadgeService.checkAndAwardBadges(userId);
-
-    res.json({ activity: newActivity, newBadges });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE: remove an activity by ID
-app.delete('/api/activities/:id', async (req, res) => {
-  try {
-    console.log('🗑️ Deleting activity:', req.params.id);
-    
-    const deletedActivity = await Activity.findByIdAndDelete(req.params.id);
-    
-    if (!deletedActivity) {
-      return res.status(404).json({ error: 'Activity not found' });
-    }
-    
-    console.log('✅ Activity deleted successfully');
-    res.json({ message: 'Activity deleted successfully' });
-  } catch (err) {
-    console.error('❌ Error deleting activity:', err);
-    res.status(500).json({ 
-      error: 'Failed to delete activity', 
-      details: err.message 
-    });
-  }
-});
-
-// Debug route: Check database schema and update existing activities
 app.get('/api/debug/activities', async (req, res) => {
   try {
     console.log('🔍 Debug: Checking database schema...');
@@ -198,25 +61,14 @@ app.get('/api/debug/activities', async (req, res) => {
   }
 });
 
-// Route to update existing activities without categories
 app.post('/api/update-categories', async (req, res) => {
   try {
     console.log('🔄 Updating activities without categories...');
-    
-    const activitiesWithoutCategory = await Activity.find({ category: { $exists: false } });
-    console.log(`📊 Found ${activitiesWithoutCategory.length} activities without categories`);
-    
-    if (activitiesWithoutCategory.length === 0) {
-      return res.json({ message: 'All activities already have categories' });
-    }
-    
     const updateResult = await Activity.updateMany(
       { category: { $exists: false } },
       { $set: { category: 'General' } }
     );
-    
     console.log(`✅ Updated ${updateResult.modifiedCount} activities with 'General' category`);
-    
     res.json({
       message: `Updated ${updateResult.modifiedCount} activities with 'General' category`,
       updatedCount: updateResult.modifiedCount
@@ -227,8 +79,212 @@ app.post('/api/update-categories', async (req, res) => {
   }
 });
 
-// Goal routes
-// Create a new goal
+
+// --- ACTIVITY ROUTES ---
+
+// GET: list all activities for a user (sorted by latest)
+app.get('/api/activities/:userId', async (req, res) => {
+  try {
+    console.log('📖 Fetching activities for user:', req.params.userId);
+    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: -1 });
+    console.log(`Found ${activities.length} activities`);
+    res.json(activities);
+  } catch (err) {
+    console.error('❌ Error fetching activities:', err);
+    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
+  }
+});
+
+// GET: list frequent activities for a user (more than 3 times in a day)
+app.get('/api/activities/:userId/frequent', async (req, res) => {
+  try {
+    console.log('📊 Fetching frequent activities for user:', req.params.userId);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const frequentActivities = await Activity.aggregate([
+      { $match: { userId: req.params.userId, date: { $gte: startOfDay, $lte: endOfDay } } },
+      { $group: {
+          _id: {
+            activityName: "$activityName",
+            category: "$category",
+            points: "$points",
+            type: "$type",
+            emoji: "$emoji"
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $match: { count: { $gt: 3 } } },
+      { $project: {
+          activityName: "$_id.activityName",
+          category: "$_id.category",
+          points: "$_id.points",
+          type: "$_id.type",
+          emoji: "$_id.emoji",
+          count: 1,
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    console.log(`Found ${frequentActivities.length} frequent activities today`);
+    res.json(frequentActivities);
+  } catch (err) {
+    console.error('❌ Error fetching frequent activities:', err);
+    res.status(500).json({ error: 'Failed to fetch frequent activities', details: err.message });
+  }
+});
+
+// POST: add a new activity
+app.post('/api/activities', async (req, res) => {
+  try {
+    // Merged to include 'emoji' from the second file
+    const { userId, activityName, points, category, type, emoji } = req.body;
+    if (!activityName || points === undefined || points === null) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const newActivity = new Activity({
+      userId,
+      activityName,
+      points,
+      category,
+      type,
+      emoji: emoji || '', // Ensure emoji has a value
+      date: new Date()
+    });
+    await newActivity.save();
+
+    // Check for new badges
+    const newBadges = await BadgeService.checkAndAwardBadges(userId);
+    res.status(201).json({ activity: newActivity, newBadges });
+  } catch (err) {
+    console.error('❌ Error creating activity:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE: remove an activity by ID
+app.delete('/api/activities/:id', async (req, res) => {
+  try {
+    console.log('🗑️ Deleting activity:', req.params.id);
+    const deletedActivity = await Activity.findByIdAndDelete(req.params.id);
+    
+    if (!deletedActivity) {
+      return res.status(404).json({ error: 'Activity not found' });
+    }
+    
+    console.log('✅ Activity deleted successfully');
+    res.json({ message: 'Activity deleted successfully' });
+  } catch (err) {
+    console.error('❌ Error deleting activity:', err);
+    res.status(500).json({ error: 'Failed to delete activity', details: err.message });
+  }
+});
+
+// --- PINNED ACTIVITY ROUTES (from second file) ---
+
+// GET: Pinned activities for a user
+app.get('/api/pinned-activities/:userId', async (req, res) => {
+  try {
+    console.log('📌 Fetching pinned activities for user:', req.params.userId);
+    const pinnedActivities = await PinnedActivity.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+    console.log(`Found ${pinnedActivities.length} pinned activities`);
+    res.json(pinnedActivities);
+  } catch (err) {
+    console.error('❌ Error fetching pinned activities:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST: Pin a new activity
+app.post('/api/pinned-activities', async (req, res) => {
+  try {
+    const { userId, activityName, points, category, emoji } = req.body;
+    if (!userId || !activityName || points === undefined) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const existingPin = await PinnedActivity.findOne({ userId, activityName });
+    if (existingPin) {
+      return res.status(400).json({ error: 'Activity already pinned' });
+    }
+
+    const newPinnedActivity = new PinnedActivity({
+      userId,
+      activityName,
+      points,
+      category: category || 'General',
+      emoji: emoji || ''
+    });
+    await newPinnedActivity.save();
+    console.log('📌 Pinned activity saved:', newPinnedActivity);
+    res.status(201).json(newPinnedActivity);
+  } catch (err) {
+    console.error('❌ Error pinning activity:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE: Unpin an activity
+app.delete('/api/pinned-activities/:userId/:activityName', async (req, res) => {
+  try {
+    const { userId, activityName } = req.params;
+    const result = await PinnedActivity.findOneAndDelete({ userId, activityName });
+    if (!result) {
+        return res.status(404).json({ error: 'Pinned activity not found' });
+    }
+    console.log('📌 Unpinned activity:', { userId, activityName });
+    res.json({ message: 'Activity unpinned successfully' });
+  } catch (err) {
+    console.error('❌ Error unpinning activity:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// --- GOAL ROUTES (using robust implementation from first file) ---
+
+// Helper function to refresh goals
+const refreshGoalsAutomatically = async (userId) => {
+  try {
+    console.log(`🔄 Refreshing goals for user: ${userId}`);
+    const goals = await Goal.find({ userId, isArchived: false });
+    const now = new Date();
+    
+    for (const goal of goals) {
+      const activities = await Activity.find({
+        userId: goal.userId,
+        date: { $gte: goal.startDate, $lt: now }
+      });
+      
+      goal.currentPoints = activities.reduce((sum, act) => sum + act.points, 0);
+      
+      if (goal.currentPoints >= goal.targetPoints) {
+        goal.isCompleted = true;
+        goal.wasSuccessful = true;
+        goal.completionDate = now;
+        goal.isArchived = true;
+      } else if (now > new Date(goal.endDate)) {
+        goal.isCompleted = true;
+        goal.wasSuccessful = false;
+        goal.completionDate = now;
+        goal.isArchived = true;
+      }
+      
+      await goal.save();
+    }
+    console.log('✅ Goals refreshed successfully');
+  } catch (err) {
+    console.error('❌ Error in automatic goal refresh:', err);
+  }
+};
+
+// POST: Create a new goal
 app.post('/api/goals', async (req, res) => {
   try {
     console.log('🎯 Creating new goal:', req.body);
@@ -248,73 +304,21 @@ app.post('/api/goals', async (req, res) => {
     });
     
     await goal.save();
-    
-    try {
-      const { newBadges } = await BadgeService.updateStatsOnGoalCreation(userId);
-      console.log('✅ Goal created successfully with badges check');
-      res.status(201).json({ goal, newBadges: newBadges || [] });
-    } catch (statsError) {
-      console.log('⚠️ Stats update failed (non-critical):', statsError.message);
-      res.status(201).json({ goal, newBadges: [] });
-    }
+    const { newBadges } = await BadgeService.updateStatsOnGoalCreation(userId);
+    console.log('✅ Goal created successfully with badges check');
+    res.status(201).json({ goal, newBadges: newBadges || [] });
   } catch (err) {
     console.error('❌ Error creating goal:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Function to refresh goals without creating new ones
-const refreshGoalsAutomatically = async (userId = 'default_user') => {
-  try {
-    console.log(`🔄 Refreshing goals for user: ${userId}`);
-    
-    const goals = await Goal.find({ 
-      userId: userId, 
-      isArchived: false 
-    });
-    
-    const now = new Date();
-    
-    for (const goal of goals) {
-      const activities = await Activity.find({
-        userId: goal.userId,
-        date: { $gte: goal.startDate, $lt: now }
-      });
-      
-      goal.currentPoints = activities.reduce((sum, act) => sum + act.points, 0);
-      
-      if (goal.currentPoints >= goal.targetPoints) {
-        goal.isCompleted = true;
-        goal.wasSuccessful = true;
-        goal.completionDate = now;
-        goal.isArchived = true; // Archive completed goals
-      } else if (now > new Date(goal.endDate)) {
-        goal.isCompleted = true;
-        goal.wasSuccessful = false;
-        goal.completionDate = now;
-        goal.isArchived = true; // Archive expired goals
-      }
-      
-      await goal.save();
-    }
-    
-    console.log('✅ Goals refreshed successfully');
-  } catch (err) {
-    console.error('❌ Error in automatic goal refresh:', err);
-  }
-};
-
-// Get all goals for a user
+// GET: All active goals for a user
 app.get('/api/goals/:userId', async (req, res) => {
   try {
     console.log('📖 Fetching goals for user:', req.params.userId);
-    
     await refreshGoalsAutomatically(req.params.userId);
-    
-    const goals = await Goal.find({ 
-      userId: req.params.userId,
-      isArchived: false 
-    }).sort({ startDate: -1 });
+    const goals = await Goal.find({ userId: req.params.userId, isArchived: false }).sort({ startDate: -1 });
     console.log(`Found ${goals.length} active goals`);
     res.json(goals);
   } catch (err) {
@@ -323,16 +327,11 @@ app.get('/api/goals/:userId', async (req, res) => {
   }
 });
 
-// Get goal history for a user
+// GET: Goal history for a user
 app.get('/api/goals/:userId/history', async (req, res) => {
   try {
     console.log('📚 Fetching goal history for user:', req.params.userId);
-    
-    const goalHistory = await Goal.find({ 
-      userId: req.params.userId,
-      isArchived: true 
-    }).sort({ completionDate: -1 });
-    
+    const goalHistory = await Goal.find({ userId: req.params.userId, isArchived: true }).sort({ completionDate: -1 });
     console.log(`Found ${goalHistory.length} archived goals`);
     res.json(goalHistory);
   } catch (err) {
@@ -341,7 +340,57 @@ app.get('/api/goals/:userId/history', async (req, res) => {
   }
 });
 
-// Get user badges
+// PUT: Update a goal
+app.put('/api/goals/:id', async (req, res) => {
+  try {
+    console.log('🔄 Updating goal:', req.params.id, req.body);
+    const goal = await Goal.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!goal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    console.log('✅ Goal updated successfully:', goal);
+    res.json(goal);
+  } catch (err) {
+    console.error('❌ Error updating goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE: a goal
+app.delete('/api/goals/:id', async (req, res) => {
+  try {
+    console.log('🗑️ Deleting goal:', req.params.id);
+    const deletedGoal = await Goal.findByIdAndDelete(req.params.id);
+    if (!deletedGoal) {
+      return res.status(404).json({ error: 'Goal not found' });
+    }
+    console.log('✅ Goal deleted successfully');
+    res.json({ message: 'Goal deleted successfully' });
+  } catch (err) {
+    console.error('❌ Error deleting goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT: Archive a goal
+app.put('/api/goals/:id/archive', async (req, res) => {
+  try {
+    console.log('📦 Archiving goal:', req.params.id);
+    const goal = await Goal.findById(req.params.id);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+
+    goal.isArchived = true;
+    await goal.save();
+    res.json({ message: 'Goal archived successfully', goal });
+  } catch (err) {
+    console.error('❌ Error archiving goal:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- BADGE, STATS, & LEADERBOARD ROUTES ---
+
+// GET: User badges
 app.get('/api/badges/:userId', async (req, res) => {
   try {
     console.log('🏆 Fetching badges for user:', req.params.userId);
@@ -354,7 +403,7 @@ app.get('/api/badges/:userId', async (req, res) => {
   }
 });
 
-// Get user stats
+// GET: User stats
 app.get('/api/stats/:userId', async (req, res) => {
   try {
     console.log('📊 Fetching stats for user:', req.params.userId);
@@ -367,7 +416,7 @@ app.get('/api/stats/:userId', async (req, res) => {
   }
 });
 
-// Get badge leaderboard
+// GET: Badge leaderboard
 app.get('/api/leaderboard/badges', async (req, res) => {
   try {
     console.log('🏅 Fetching badge leaderboard');
@@ -379,78 +428,8 @@ app.get('/api/leaderboard/badges', async (req, res) => {
   }
 });
 
-// Update goal progress
-app.put('/api/goals/:id', async (req, res) => {
-  try {
-    console.log('🔄 Updating goal progress:', req.params.id, req.body);
-    const goal = await Goal.findById(req.params.id);
-    
-    if (!goal) {
-      return res.status(404).json({ error: 'Goal not found' });
-    }
 
-    goal.currentPoints = req.body.currentPoints || goal.currentPoints;
-    if (req.body.isCompleted) {
-      goal.isCompleted = true;
-      goal.wasSuccessful = req.body.wasSuccessful || false;
-      goal.completionDate = req.body.completionDate || new Date();
-    }
-    
-    await goal.save();
-    
-    console.log('✅ Goal updated successfully:', goal);
-    res.json(goal);
-  } catch (err) {
-    console.error('❌ Error updating goal:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete a goal
-app.delete('/api/goals/:id', async (req, res) => {
-  try {
-    console.log('🗑️ Deleting goal:', req.params.id);
-    const deletedGoal = await Goal.findByIdAndDelete(req.params.id);
-    
-    if (!deletedGoal) {
-      return res.status(404).json({ error: 'Goal not found' });
-    }
-    
-    console.log('✅ Goal deleted successfully');
-    res.json({ message: 'Goal deleted successfully' });
-  } catch (err) {
-    console.error('❌ Error deleting goal:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Archive a goal
-app.put('/api/goals/:id/archive', async (req, res) => {
-  try {
-    console.log('📦 Archiving goal:', req.params.id);
-    const goal = await Goal.findById(req.params.id);
-    
-    if (!goal) {
-      return res.status(404).json({ error: 'Goal not found' });
-    }
-
-    if (!goal.isCompleted) {
-      return res.status(400).json({ error: 'Goal is not completed' });
-    }
-
-    goal.isArchived = true;
-    goal.completionDate = goal.completionDate || new Date();
-    goal.wasSuccessful = true;
-    await goal.save();
-
-    res.json({ message: 'Goal archived successfully', goal });
-  } catch (err) {
-    console.error('❌ Error archiving goal:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Error handling middleware
+// --- ERROR HANDLING MIDDLEWARE ---
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -459,29 +438,21 @@ app.use((err, req, res, next) => {
   });
 });
 
+// --- SERVER STARTUP ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Ready to accept requests from frontend`);
-  console.log(`🎯 Goal routes available:`);
-  console.log(`   POST /api/goals`);
-  console.log(`   GET /api/goals/:userId`);
-  console.log(`   GET /api/goals/:userId/history`);
-  console.log(`   PUT /api/goals/:id`);
-  console.log(`   DELETE /api/goals/:id`);
-  console.log(`   PUT /api/goals/:id/archive`);
-  console.log(`📚 Goal history tracking enabled`);
+  console.log(`📱 Ready to accept requests`);
 });
 
-// Set up automatic goal refresh every hour
+// --- SCHEDULED TASKS ---
+// Set up automatic goal refresh every hour for a default user
 setInterval(async () => {
   try {
+    // Note: You might want to refresh for all active users, not just a default one.
     await refreshGoalsAutomatically('default_user');
     console.log('🕐 Hourly goal refresh completed');
   } catch (error) {
     console.log('⚠️ Hourly goal refresh failed:', error.message);
   }
-}, 60 * 60 * 1000);
-
-const badgeRoutes = require('./routes/badgeRoutes');
-app.use('/api/badges', badgeRoutes);
+}, 60 * 60 * 1000); // 1 hour

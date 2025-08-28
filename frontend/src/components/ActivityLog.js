@@ -1,6 +1,13 @@
 import React from 'react';
 
 function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCustomActivity, unpinCustomActivity, positiveActivities, negativeActivities, categories, selectedCategoryFilter, setSelectedCategoryFilter }) {
+  console.log('📋 ActivityLog props:', {
+    activities: activities.map(a => ({ id: a._id, name: a.activityName, category: a.category })),
+    pinnedCustomActivities,
+    pinCustomActivity: typeof pinCustomActivity,
+    unpinCustomActivity: typeof unpinCustomActivity
+  });
+
   return (
     <div>
       <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>📋 Activity Log</h2>
@@ -38,9 +45,15 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
           {activities
             .filter(a => selectedCategoryFilter === 'All' || a.category === selectedCategoryFilter)
             .map((a) => {
-              const isPredefined = positiveActivities.some(p => p.activity === a.activityName) ||
-                                   negativeActivities.some(n => n.activity === a.activityName);
+              const isPredefined = positiveActivities.some(p => p.activity === a.activityName && p.category === a.category) ||
+                                   negativeActivities.some(n => n.activity === a.activityName && n.category === a.category);
               const isPinned = pinnedCustomActivities.some(p => p.activityName === a.activityName);
+
+              console.log(`Activity ${a.activityName}:`, {
+                isPredefined,
+                isPinned,
+                activityData: { id: a._id, name: a.activityName, points: a.points, category: a.category, emoji: a.emoji }
+              });
 
               return (
                 <li key={a._id} style={{
@@ -88,7 +101,10 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                     <button 
-                      onClick={() => handleDelete(a._id)}
+                      onClick={() => {
+                        console.log('🗑️ Delete button clicked for:', a.activityName);
+                        handleDelete(a._id);
+                      }}
                       style={{
                         marginLeft: '15px',
                         padding: '8px 12px',
@@ -105,12 +121,15 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                     </button>
                     {!isPredefined && !isPinned && (
                       <button
-                        onClick={() => pinCustomActivity({
-                          activityName: a.activityName,
-                          points: a.points,
-                          category: a.category,
-                          emoji: a.emoji || '✨'
-                        })}
+                        onClick={() => {
+                          console.log('📌 Pin button clicked for:', a.activityName);
+                          pinCustomActivity({
+                            activityName: a.activityName,
+                            points: a.points,
+                            category: a.category || 'General',
+                            emoji: a.emoji || '✨'
+                          });
+                        }}
                         style={{
                           padding: '6px 10px',
                           backgroundColor: '#f1c40f',
@@ -126,7 +145,10 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                     )}
                     {!isPredefined && isPinned && (
                       <button
-                        onClick={() => unpinCustomActivity(a.activityName)}
+                        onClick={() => {
+                          console.log('📌 Unpin button clicked for:', a.activityName);
+                          unpinCustomActivity(a.activityName);
+                        }}
                         style={{
                           padding: '6px 10px',
                           backgroundColor: '#e74c3c',
