@@ -105,15 +105,14 @@ function App() {
 
   // Fetch goals from backend
   const fetchGoals = async () => {
-  try {
-    const response = await axios.get('http://localhost:5000/api/goals/default_user');
-    setGoals(response.data);
-  } catch (err) {
-    console.error('❌ Error fetching goals:', err);
-    // Add user-friendly error handling, e.g., alert('Failed to load goals');
-  }
+    try {
+      const response = await axios.get('http://localhost:5000/api/goals/default_user');
+      setGoals(response.data);
+    } catch (err) {
+      console.error('❌ Error fetching goals:', err);
+      // Add user-friendly error handling, e.g., alert('Failed to load goals');
+    }
   };
-
 
   // Log predefined activity
   const logPredefined = async (activity, points, category) => {
@@ -170,42 +169,74 @@ function App() {
   };
 
   // Update all active goals' progress after activity is logged
-  // Update all active goals' progress after activity is logged
-// Update all active goals' progress after activity is logged
-const updateGoalsProgress = async (pointsEarned) => {
-  let completedGoal = null;
-  
-  try {
-    const response = await axios.get('http://localhost:5000/api/goals/default_user');
-    const updatedGoals = response.data;
-    setGoals(updatedGoals);
-    
-    for (const goal of updatedGoals) {
-      if (goal.isCompleted && !goal.isArchived) {
-        completedGoal = goal;
-        break;
-      }
-    }
-    
-    if (completedGoal) {
-      setCompletedGoal(completedGoal);
-      setShowGoalCompleteNotification(true);
-      setTimeout(async () => {
-        setShowGoalCompleteNotification(false);
-        setCompletedGoal(null);
-        try {
-          await axios.put(`http://localhost:5000/api/goals/${completedGoal._id}/archive`);
-          await fetchGoals();
-        } catch (archiveErr) {
-          console.error('❌ Error archiving goal:', archiveErr);
-          alert('Failed to archive goal: ' + (archiveErr.response?.data?.error || archiveErr.message));
+  const updateGoalsProgress = (pointsEarned) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Fetch the latest goals
+        const response = await axios.get('http://localhost:5000/api/goals/default_user');
+        const updatedGoals = response.data;
+        console.log('Goals before update:', updatedGoals);
+
+        // Collect completed goals
+        const completedGoals = [];
+
+        // Update progress for each active goal
+        for (const goal of updatedGoals) {
+          if (!goal.isCompleted && !goal.isArchived) {
+            const newPoints = goal.currentPoints + pointsEarned;
+            const isCompleted = newPoints >= goal.targetPoints;
+
+            // Update goal progress and completion status
+            await axios.put(`http://localhost:5000/api/goals/${goal._id}`, {
+              currentPoints: newPoints,
+              isCompleted: isCompleted,
+              wasSuccessful: isCompleted,
+              completionDate: isCompleted ? new Date() : goal.completionDate
+            });
+
+            if (isCompleted) {
+              // Archive the completed goal
+              await axios.put(`http://localhost:5000/api/goals/${goal._id}/archive`);
+              completedGoals.push({ ...goal, currentPoints: newPoints });
+              console.log('Completed goal:', goal._id);
+            }
+          }
         }
-      }, 3500);
-    }
-  } catch (err) {
-    console.error('❌ Error updating goals progress:', err);
-  }
-};
+
+        // Show notifications for completed goals sequentially
+        if (completedGoals.length > 0) {
+          const showNextNotification = async (index = 0) => {
+            if (index >= completedGoals.length) {
+              await fetchGoals();
+              resolve();
+              return;
+            }
+
+            const goal = completedGoals[index];
+            setCompletedGoal(goal);
+            setShowGoalCompleteNotification(true);
+            console.log('Showing notification for goal:', goal._id);
+
+            setTimeout(() => {
+              setShowGoalCompleteNotification(false);
+              setCompletedGoal(null);
+              showNextNotification(index + 1);
+            }, 3500);
+          };
+
+          showNextNotification();
+        } else {
+          // No goals completed, refresh and resolve
+          await fetchGoals();
+          resolve();
+        }
+      } catch (err) {
+        console.error('❌ Error updating goals progress:', err);
+        alert('Failed to update goals: ' + (err.response?.data?.error || err.message));
+        reject(err);
+      }
+    });
+  };
 
   // Delete activity
   const handleDelete = async (id) => {
@@ -220,21 +251,21 @@ const updateGoalsProgress = async (pointsEarned) => {
 
   // Create new goal
   const createGoal = async (e) => {
-  e.preventDefault();
-  try {
-    const response = await axios.post('http://localhost:5000/api/goals', {
-      userId: 'default_user',
-      targetPoints: newGoal.targetPoints,
-      endDate: newGoal.endDate,
-      goalType: newGoal.goalType
-    });
-    setShowGoalModal(false);
-    setNewGoal({ targetPoints: '', goalType: 'daily', endDate: getEndDateForGoalType('daily') });
-    await fetchGoals();
-  } catch (err) {
-    console.error('❌ Error creating goal:', err);
-    alert('Failed to create goal: ' + (err.response?.data?.error || err.message));
-  }
+    e.preventDefault();
+    try {
+      const response = await axios.post('http://localhost:5000/api/goals', {
+        userId: 'default_user',
+        targetPoints: newGoal.targetPoints,
+        endDate: newGoal.endDate,
+        goalType: newGoal.goalType
+      });
+      setShowGoalModal(false);
+      setNewGoal({ targetPoints: '', goalType: 'daily', endDate: getEndDateForGoalType('daily') });
+      await fetchGoals();
+    } catch (err) {
+      console.error('❌ Error creating goal:', err);
+      alert('Failed to create goal: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   // Delete goal
@@ -729,99 +760,99 @@ const updateGoalsProgress = async (pointsEarned) => {
               </button>
             </div>
             {goals.filter(goal => !goal.isArchived).length === 0 ? (
-  <div style={{
-    textAlign: 'center',
-    padding: '30px',
-    color: '#666',
-    backgroundColor: '#f8f9fa',
-    borderRadius: '12px',
-    border: '2px dashed #ddd'
-  }}>
-    <div style={{ fontSize: '36px', marginBottom: '15px' }}>🎯</div>
-    <p style={{ fontSize: '16px', marginBottom: '10px' }}>No active goals!</p>
-    <p style={{ fontSize: '14px' }}>Set daily, weekly, or monthly eco-point targets to track your progress.</p>
-  </div>
-) : (
-  <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
-    {goals
-      .filter(goal => !goal.isArchived) // Only show non-archived goals
-      .map((goal) => {
-        const progress = Math.min((goal.currentPoints / goal.targetPoints) * 100, 100);
-        const isCompleted = goal.isCompleted;
-        const isExpired = new Date() > new Date(goal.endDate) && !isCompleted;
-        
-        return (
-          <div key={goal._id} style={{
-            backgroundColor: 'white',
-            padding: '20px',
-            borderRadius: '12px',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-            border: `2px solid ${isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'}`
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-              <div>
-                <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50' }}>{goal.goalType} Goal</h3>
-                <p style={{ margin: '0', color: '#7f8c8d' }}>
-                  Due: {new Date(goal.endDate).toLocaleDateString()}
-                </p>
-              </div>
-              <button
-                onClick={() => deleteGoal(goal._id)}
-                style={{
-                  padding: '5px 10px',
-                  backgroundColor: '#e74c3c',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '12px'
-                }}
-              >
-                🗑️
-              </button>
-            </div>
-            <div style={{ marginBottom: '15px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '14px', color: '#555' }}>
-                  Progress: {goal.currentPoints} / {goal.targetPoints} points
-                </span>
-                <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCompleted ? '#27ae60' : '#f39c12' }}>
-                  {Math.round(progress)}%
-                </span>
-              </div>
               <div style={{
-                width: '100%',
-                height: '8px',
-                backgroundColor: '#ecf0f1',
-                borderRadius: '4px',
-                overflow: 'hidden'
+                textAlign: 'center',
+                padding: '30px',
+                color: '#666',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '12px',
+                border: '2px dashed #ddd'
               }}>
-                <div style={{
-                  width: `${progress}%`,
-                  height: '100%',
-                  backgroundColor: isCompleted ? '#27ae60' : '#f39c12'
-                }} />
+                <div style={{ fontSize: '36px', marginBottom: '15px' }}>🎯</div>
+                <p style={{ fontSize: '16px', marginBottom: '10px' }}>No active goals!</p>
+                <p style={{ fontSize: '14px' }}>Set daily, weekly, or monthly eco-point targets to track your progress.</p>
               </div>
-            </div>
-            <div style={{
-              padding: '8px 12px',
-              backgroundColor: isCompleted ? '#d5f4e6' : isExpired ? '#fadbd8' : '#fef9e7',
-              borderRadius: '6px',
-              textAlign: 'center'
-            }}>
-              <span style={{
-                fontSize: '12px',
-                fontWeight: 'bold',
-                color: isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'
-              }}>
-                {isCompleted ? '🎉 Goal Completed!' : isExpired ? '⏰ Goal Expired' : '🚀 In Progress'}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-  </div>
-)}
+            ) : (
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
+                {goals
+                  .filter(goal => !goal.isArchived) // Only show non-archived goals
+                  .map((goal) => {
+                    const progress = Math.min((goal.currentPoints / goal.targetPoints) * 100, 100);
+                    const isCompleted = goal.isCompleted;
+                    const isExpired = new Date() > new Date(goal.endDate) && !isCompleted;
+                    
+                    return (
+                      <div key={goal._id} style={{
+                        backgroundColor: 'white',
+                        padding: '20px',
+                        borderRadius: '12px',
+                        boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+                        border: `2px solid ${isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'}`
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+                          <div>
+                            <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50' }}>{goal.goalType} Goal</h3>
+                            <p style={{ margin: '0', color: '#7f8c8d' }}>
+                              Due: {new Date(goal.endDate).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => deleteGoal(goal._id)}
+                            style={{
+                              padding: '5px 10px',
+                              backgroundColor: '#e74c3c',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '12px'
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                        <div style={{ marginBottom: '15px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '14px', color: '#555' }}>
+                              Progress: {goal.currentPoints} / {goal.targetPoints} points
+                            </span>
+                            <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCompleted ? '#27ae60' : '#f39c12' }}>
+                              {Math.round(progress)}%
+                            </span>
+                          </div>
+                          <div style={{
+                            width: '100%',
+                            height: '8px',
+                            backgroundColor: '#ecf0f1',
+                            borderRadius: '4px',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              width: `${progress}%`,
+                              height: '100%',
+                              backgroundColor: isCompleted ? '#27ae60' : '#f39c12'
+                            }} />
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: '8px 12px',
+                          backgroundColor: isCompleted ? '#d5f4e6' : isExpired ? '#fadbd8' : '#fef9e7',
+                          borderRadius: '6px',
+                          textAlign: 'center'
+                        }}>
+                          <span style={{
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            color: isCompleted ? '#27ae60' : isExpired ? '#e74c3c' : '#f39c12'
+                          }}>
+                            {isCompleted ? '🎉 Goal Completed!' : isExpired ? '⏰ Goal Expired' : '🚀 In Progress'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
 
           {/* Badge Display */}

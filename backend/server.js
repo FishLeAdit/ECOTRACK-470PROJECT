@@ -3,8 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const Activity = require('./models/activity'); // import model
-const Goal = require('./models/goal'); // import goal model
+const Activity = require('./models/activity');
+const Goal = require('./models/goal');
 const Badge = require('./models/badge');
 const UserStats = require('./models/userStats');
 const BadgeService = require('./services/badgeService');
@@ -35,7 +35,6 @@ app.get('/api/activities', async (req, res) => {
     const activities = await Activity.find().sort({ date: -1 });
     console.log(`Found ${activities.length} activities`);
     
-    // Debug: Log categories for each activity
     activities.forEach((activity, index) => {
       console.log(`Activity ${index + 1}:`, {
         id: activity._id,
@@ -52,7 +51,7 @@ app.get('/api/activities', async (req, res) => {
   }
 });
 
-// POST: add a new activity - FIXED to work with original frontend
+// POST: add a new activity
 app.post('/api/activities', async (req, res) => {
   try {
     const { userId, activityName, points, category, type } = req.body;
@@ -106,7 +105,6 @@ app.get('/api/debug/activities', async (req, res) => {
   try {
     console.log('🔍 Debug: Checking database schema...');
     
-    // Check if activities have category field
     const activities = await Activity.find();
     const activitiesWithoutCategory = activities.filter(a => !a.category);
     const activitiesWithCategory = activities.filter(a => a.category);
@@ -126,7 +124,6 @@ app.get('/api/debug/activities', async (req, res) => {
       sampleWithoutCategory: activitiesWithoutCategory.slice(0, 3),
       sampleWithCategory: activitiesWithCategory.slice(0, 3)
     });
-    
   } catch (err) {
     console.error('❌ Debug error:', err);
     res.status(500).json({ error: 'Debug failed', details: err.message });
@@ -138,7 +135,6 @@ app.post('/api/update-categories', async (req, res) => {
   try {
     console.log('🔄 Updating activities without categories...');
     
-    // Find activities without categories
     const activitiesWithoutCategory = await Activity.find({ category: { $exists: false } });
     console.log(`📊 Found ${activitiesWithoutCategory.length} activities without categories`);
     
@@ -146,7 +142,6 @@ app.post('/api/update-categories', async (req, res) => {
       return res.json({ message: 'All activities already have categories' });
     }
     
-    // Update all activities without categories to have 'General' category
     const updateResult = await Activity.updateMany(
       { category: { $exists: false } },
       { $set: { category: 'General' } }
@@ -158,7 +153,6 @@ app.post('/api/update-categories', async (req, res) => {
       message: `Updated ${updateResult.modifiedCount} activities with 'General' category`,
       updatedCount: updateResult.modifiedCount
     });
-    
   } catch (err) {
     console.error('❌ Error updating categories:', err);
     res.status(500).json({ error: 'Failed to update categories', details: err.message });
@@ -182,12 +176,11 @@ app.post('/api/goals', async (req, res) => {
       endDate: new Date(endDate),
       goalType,
       currentPoints: 0,
-      startDate: new Date()  // Explicitly set if needed
+      startDate: new Date()
     });
     
     await goal.save();
     
-    // Update stats for goal creation and check for badges
     try {
       const { newBadges } = await BadgeService.updateStatsOnGoalCreation(userId);
       console.log('✅ Goal created successfully with badges check');
@@ -196,16 +189,14 @@ app.post('/api/goals', async (req, res) => {
       console.log('⚠️ Stats update failed (non-critical):', statsError.message);
       res.status(201).json({ goal, newBadges: [] });
     }
-    
   } catch (err) {
     console.error('❌ Error creating goal:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Function to automatically refresh goals based on their type
-// Improved function to automatically refresh goals based on their type
-const refreshGoalsAutomatically = async (userId = 'default_user') => {  // Optional userId param for flexibility
+// Function to refresh goals without creating new ones
+const refreshGoalsAutomatically = async (userId = 'default_user') => {
   try {
     console.log(`🔄 Refreshing goals for user: ${userId}`);
     
@@ -217,10 +208,9 @@ const refreshGoalsAutomatically = async (userId = 'default_user') => {  // Optio
     const now = new Date();
     
     for (const goal of goals) {
-      // Calculate current points from activities in the period
       const activities = await Activity.find({
         userId: goal.userId,
-        date: { $gte: goal.startDate, $lt: now }  // Up to now, to avoid future activities
+        date: { $gte: goal.startDate, $lt: now }
       });
       
       goal.currentPoints = activities.reduce((sum, act) => sum + act.points, 0);
@@ -229,39 +219,12 @@ const refreshGoalsAutomatically = async (userId = 'default_user') => {  // Optio
         goal.isCompleted = true;
         goal.wasSuccessful = true;
         goal.completionDate = now;
+        goal.isArchived = true; // Archive completed goals
       } else if (now > new Date(goal.endDate)) {
-        // Expired without completion
         goal.isCompleted = true;
         goal.wasSuccessful = false;
         goal.completionDate = now;
-        goal.isArchived = true;
-        
-        // Create new goal
-        let newEndDate = new Date(now);
-        switch (goal.goalType) {
-          case 'daily':
-            newEndDate.setDate(newEndDate.getDate() + 1);
-            break;
-          case 'weekly':
-            newEndDate.setDate(newEndDate.getDate() + 7);
-            break;
-          case 'monthly':
-            newEndDate.setMonth(newEndDate.getMonth() + 1);
-            break;
-        }
-        
-        const newGoal = new Goal({
-          userId: goal.userId,
-          targetPoints: goal.targetPoints,
-          startDate: now,
-          endDate: newEndDate,
-          goalType: goal.goalType,
-          currentPoints: 0,
-          isCompleted: false,
-          isArchived: false
-        });
-        await newGoal.save();
-        console.log(`🔄 Created new ${goal.goalType} goal for expired goal`);
+        goal.isArchived = true; // Archive expired goals
       }
       
       await goal.save();
@@ -278,7 +241,6 @@ app.get('/api/goals/:userId', async (req, res) => {
   try {
     console.log('📖 Fetching goals for user:', req.params.userId);
     
-    // Auto-refresh goals before fetching
     await refreshGoalsAutomatically(req.params.userId);
     
     const goals = await Goal.find({ 
@@ -356,10 +318,16 @@ app.put('/api/goals/:id', async (req, res) => {
     const goal = await Goal.findById(req.params.id);
     
     if (!goal) {
-      return res.status(404).json({ error: "Goal not found" });
+      return res.status(404).json({ error: 'Goal not found' });
     }
 
     goal.currentPoints = req.body.currentPoints || goal.currentPoints;
+    if (req.body.isCompleted) {
+      goal.isCompleted = true;
+      goal.wasSuccessful = req.body.wasSuccessful || false;
+      goal.completionDate = req.body.completionDate || new Date();
+    }
+    
     await goal.save();
     
     console.log('✅ Goal updated successfully:', goal);
@@ -388,8 +356,7 @@ app.delete('/api/goals/:id', async (req, res) => {
   }
 });
 
-// In server.js, add this new endpoint after the other goal routes
-
+// Archive a goal
 app.put('/api/goals/:id/archive', async (req, res) => {
   try {
     console.log('📦 Archiving goal:', req.params.id);
@@ -399,57 +366,23 @@ app.put('/api/goals/:id/archive', async (req, res) => {
       return res.status(404).json({ error: 'Goal not found' });
     }
 
-    // Ensure it's completed before archiving
     if (!goal.isCompleted) {
       return res.status(400).json({ error: 'Goal is not completed' });
     }
 
     goal.isArchived = true;
     goal.completionDate = goal.completionDate || new Date();
-    goal.wasSuccessful = true; // Since it's completed
+    goal.wasSuccessful = true;
     await goal.save();
 
-    // Create a new goal for the next period starting now
-    const now = new Date();
-    let newEndDate = new Date();
-    
-    switch (goal.goalType) {
-      case 'daily':
-        newEndDate.setDate(newEndDate.getDate() + 1);
-        break;
-      case 'weekly':
-        newEndDate.setDate(newEndDate.getDate() + 7);
-        break;
-      case 'monthly':
-        newEndDate.setMonth(newEndDate.getMonth() + 1);
-        break;
-      default:
-        // If not a standard type, don't create new
-        return res.json({ message: 'Goal archived successfully', goal });
-    }
-
-    const newGoal = new Goal({
-      userId: goal.userId,
-      targetPoints: goal.targetPoints,
-      startDate: now,
-      endDate: newEndDate,
-      goalType: goal.goalType,
-      currentPoints: 0,
-      isCompleted: false,
-      isArchived: false
-    });
-    
-    await newGoal.save();
-    console.log(`🔄 Created new ${goal.goalType} goal after archiving`);
-
-    res.json({ message: 'Goal archived and new goal created', goal, newGoal });
+    res.json({ message: 'Goal archived successfully', goal });
   } catch (err) {
     console.error('❌ Error archiving goal:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Error handling middleware - MUST be last
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ 
@@ -457,8 +390,6 @@ app.use((err, req, res, next) => {
     details: err.message 
   });
 });
-
-
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -470,7 +401,7 @@ app.listen(PORT, () => {
   console.log(`   GET /api/goals/:userId/history`);
   console.log(`   PUT /api/goals/:id`);
   console.log(`   DELETE /api/goals/:id`);
-  console.log(`🔄 Auto-refresh enabled for daily/weekly/monthly goals`);
+  console.log(`   PUT /api/goals/:id/archive`);
   console.log(`📚 Goal history tracking enabled`);
 });
 
