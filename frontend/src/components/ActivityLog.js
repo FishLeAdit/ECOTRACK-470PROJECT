@@ -1,4 +1,3 @@
-// First, create a new file ActivityLog.js in your components folder:
 import React from 'react';
 
 function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCustomActivity, unpinCustomActivity, positiveActivities, negativeActivities, categories, selectedCategoryFilter, setSelectedCategoryFilter }) {
@@ -39,7 +38,6 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
           {activities
             .filter(a => selectedCategoryFilter === 'All' || a.category === selectedCategoryFilter)
             .map((a) => {
-              // Only show pin button for custom activities (not in predefined lists and not already pinned)
               const isPredefined = positiveActivities.some(p => p.activity === a.activityName) ||
                                    negativeActivities.some(n => n.activity === a.activityName);
               const isPinned = pinnedCustomActivities.some(p => p.activityName === a.activityName);
@@ -105,7 +103,6 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                     >
                       🗑️ Delete
                     </button>
-                    {/* Pin button for custom activities */}
                     {!isPredefined && !isPinned && (
                       <button
                         onClick={() => pinCustomActivity({
@@ -125,6 +122,22 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                         }}
                       >
                         📌 Pin
+                      </button>
+                    )}
+                    {!isPredefined && isPinned && (
+                      <button
+                        onClick={() => unpinCustomActivity(a.activityName)}
+                        style={{
+                          padding: '6px 10px',
+                          backgroundColor: '#e74c3c',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        📌 Unpin
                       </button>
                     )}
                   </div>

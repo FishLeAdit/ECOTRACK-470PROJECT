@@ -9,6 +9,7 @@ import ActivityLog from './components/ActivityLog';
 function App() {
   // State declarations
   const [activities, setActivities] = useState([]);
+  const [frequentActivities, setFrequentActivities] = useState([]);
   const [customActivity, setCustomActivity] = useState('');
   const [customPoints, setCustomPoints] = useState('');
   const [customEmoji, setCustomEmoji] = useState('');
@@ -82,6 +83,7 @@ function App() {
   // Fetch data on component mount
   useEffect(() => {
     fetchActivities();
+    fetchFrequentActivities();
     fetchGoals();
   }, []);
 
@@ -94,6 +96,17 @@ function App() {
     } catch (err) {
       console.error('❌ Error fetching activities:', err);
       alert('Error fetching activities: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Fetch frequent activities from backend
+  const fetchFrequentActivities = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/activities/default_user/frequent');
+      setFrequentActivities(response.data);
+    } catch (err) {
+      console.error('❌ Error fetching frequent activities:', err);
+      alert('Error fetching frequent activities: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -110,7 +123,7 @@ function App() {
       setGoals(response.data);
     } catch (err) {
       console.error('❌ Error fetching goals:', err);
-      // Add user-friendly error handling, e.g., alert('Failed to load goals');
+      alert('Failed to load goals');
     }
   };
 
@@ -131,6 +144,7 @@ function App() {
       }
       await updateGoalsProgress(points);
       await fetchActivities();
+      await fetchFrequentActivities();
       await fetchGoals();
     } catch (err) {
       console.error('❌ Error adding predefined activity:', err);
@@ -157,6 +171,7 @@ function App() {
       }
       await updateGoalsProgress(Number(customPoints));
       await fetchActivities();
+      await fetchFrequentActivities();
       await fetchGoals();
       setCustomActivity('');
       setCustomPoints('');
@@ -168,25 +183,41 @@ function App() {
     }
   };
 
+  // Pin custom activity
+  const pinCustomActivity = (activity) => {
+    setPinnedCustomActivities((prev) => {
+      const newPinned = [...prev, activity];
+      // Ensure no duplicates by activityName
+      const uniquePinned = newPinned.reduce((acc, curr) => {
+        if (!acc.some(item => item.activityName === curr.activityName)) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+      return uniquePinned.slice(0, 10); // Limit to 10 pinned activities
+    });
+  };
+
+  // Unpin custom activity
+  const unpinCustomActivity = (activityName) => {
+    setPinnedCustomActivities((prev) => prev.filter(a => a.activityName !== activityName));
+  };
+
   // Update all active goals' progress after activity is logged
   const updateGoalsProgress = (pointsEarned) => {
     return new Promise(async (resolve, reject) => {
       try {
-        // Fetch the latest goals
         const response = await axios.get('http://localhost:5000/api/goals/default_user');
         const updatedGoals = response.data;
         console.log('Goals before update:', updatedGoals);
 
-        // Collect completed goals
         const completedGoals = [];
 
-        // Update progress for each active goal
         for (const goal of updatedGoals) {
           if (!goal.isCompleted && !goal.isArchived) {
             const newPoints = goal.currentPoints + pointsEarned;
             const isCompleted = newPoints >= goal.targetPoints;
 
-            // Update goal progress and completion status
             await axios.put(`http://localhost:5000/api/goals/${goal._id}`, {
               currentPoints: newPoints,
               isCompleted: isCompleted,
@@ -195,7 +226,6 @@ function App() {
             });
 
             if (isCompleted) {
-              // Archive the completed goal
               await axios.put(`http://localhost:5000/api/goals/${goal._id}/archive`);
               completedGoals.push({ ...goal, currentPoints: newPoints });
               console.log('Completed goal:', goal._id);
@@ -203,7 +233,6 @@ function App() {
           }
         }
 
-        // Show notifications for completed goals sequentially
         if (completedGoals.length > 0) {
           const showNextNotification = async (index = 0) => {
             if (index >= completedGoals.length) {
@@ -221,98 +250,22 @@ function App() {
               setShowGoalCompleteNotification(false);
               setCompletedGoal(null);
               showNextNotification(index + 1);
-            }, 3500);
+            }, 3000);
           };
 
           showNextNotification();
         } else {
-          // No goals completed, refresh and resolve
           await fetchGoals();
           resolve();
         }
       } catch (err) {
-        console.error('❌ Error updating goals progress:', err);
-        alert('Failed to update goals: ' + (err.response?.data?.error || err.message));
+        console.error('❌ Error updating goals:', err);
         reject(err);
       }
     });
   };
 
-  // Delete activity
-  const handleDelete = async (id) => {
-    try {
-      await axios.delete(`http://localhost:5000/api/activities/${id}`);
-      fetchActivities();
-    } catch (err) {
-      console.error('❌ Error deleting activity:', err);
-      alert("Error deleting activity: " + (err.response?.data?.error || err.message));
-    }
-  };
-
-  // Create new goal
-  const createGoal = async (e) => {
-    e.preventDefault();
-    try {
-      const response = await axios.post('http://localhost:5000/api/goals', {
-        userId: 'default_user',
-        targetPoints: newGoal.targetPoints,
-        endDate: newGoal.endDate,
-        goalType: newGoal.goalType
-      });
-      setShowGoalModal(false);
-      setNewGoal({ targetPoints: '', goalType: 'daily', endDate: getEndDateForGoalType('daily') });
-      await fetchGoals();
-    } catch (err) {
-      console.error('❌ Error creating goal:', err);
-      alert('Failed to create goal: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
-  // Delete goal
-  const deleteGoal = async (goalId) => {
-    if (!window.confirm('Are you sure you want to delete this goal?')) return;
-    try {
-      await axios.delete(`http://localhost:5000/api/goals/${goalId}`);
-      fetchGoals();
-    } catch (err) {
-      console.error('❌ Error deleting goal:', err);
-      alert("Error deleting goal: " + (err.response?.data?.error || err.message));
-    }
-  };
-
-  // Function to refresh goals (call this when needed)
-  const refreshGoals = async () => {
-    try {
-      // This will trigger the backend's refreshGoalsAutomatically function
-      const response = await axios.get('http://localhost:5000/api/goals/default_user');
-      setGoals(response.data);
-    } catch (err) {
-      console.error('❌ Error refreshing goals:', err);
-    }
-  };
-
-  // Pin a custom activity
-  const pinCustomActivity = (activityObj) => {
-    const name = activityObj.activityName || activityObj.activity;
-    if (!pinnedCustomActivities.some(a => (a.activityName || a.activity) === name)) {
-      setPinnedCustomActivities([
-        ...pinnedCustomActivities,
-        {
-          activityName: name,
-          points: activityObj.points,
-          emoji: activityObj.emoji,
-          category: activityObj.category
-        }
-      ]);
-    }
-  };
-
-  // Unpin a custom activity
-  const unpinCustomActivity = (activityName) => {
-    setPinnedCustomActivities(pinnedCustomActivities.filter(a => a.activityName !== activityName));
-  };
-
-  // When opening the modal, set the default end date for the default goal type
+  // Handle goal modal open/close
   const openGoalModal = () => {
     setShowGoalModal(true);
     setNewGoal({
@@ -322,67 +275,159 @@ function App() {
     });
   };
 
-  // Activity box component
-  const ActivityBox = ({ activity, points, emoji, category, onClick }) => (
-    <button
-      onClick={() => onClick(activity, points, category)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '160px',
-        height: '120px',
-        padding: '15px',
-        margin: '5px',
-        backgroundColor: points > 0 ? '#27ae60' : '#c0392b',
-        color: 'white',
-        border: 'none',
-        borderRadius: '12px',
-        cursor: 'pointer',
-        boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-        transition: 'all 0.3s ease',
-        fontSize: '12px',
-        fontWeight: 'bold',
-        textAlign: 'center'
-      }}
-    >
-      <div style={{ fontSize: '24px', marginBottom: '8px' }}>{emoji}</div>
-      <div style={{ fontSize: '11px', marginBottom: '4px' }}>{activity}</div>
-      <div style={{ fontSize: '9px', marginBottom: '4px' }}>{category || 'General'}</div>
-      <div style={{ fontSize: '14px', fontWeight: 'bold' }}>
-        {points > 0 ? `+${points}` : points}
-      </div>
-    </button>
-  );
+  const closeGoalModal = () => {
+    setShowGoalModal(false);
+    setNewGoal({
+      targetPoints: '',
+      goalType: 'daily',
+      endDate: getEndDateForGoalType('daily')
+    });
+  };
+
+  // Handle goal submission
+  const handleGoalSubmit = async (e) => {
+    e.preventDefault();
+    if (!newGoal.targetPoints || !newGoal.endDate) return alert("Please fill all fields");
+    try {
+      const payload = { 
+        userId: 'default_user',
+        targetPoints: parseInt(newGoal.targetPoints),
+        endDate: newGoal.endDate,
+        goalType: newGoal.goalType
+      };
+      const response = await axios.post('http://localhost:5000/api/goals', payload);
+      if (response.data.newBadges && response.data.newBadges.length > 0) {
+        setNewBadges(response.data.newBadges);
+        setShowBadgeNotification(true);
+      }
+      await fetchGoals();
+      closeGoalModal();
+    } catch (err) {
+      console.error('❌ Error adding goal:', err);
+      alert("Error adding goal: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Delete activity
+  const handleDelete = async (id) => {
+    try {
+      await axios.delete(`http://localhost:5000/api/activities/${id}`);
+      await fetchActivities();
+      await fetchFrequentActivities();
+      await fetchGoals();
+    } catch (err) {
+      console.error('❌ Error deleting activity:', err);
+      alert("Error deleting activity: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Delete goal
+  const deleteGoal = async (id) => {
+    try {
+      await axios.delete(`http://localhost:500Obama/api/goals/${id}`);
+      await fetchGoals();
+    } catch (err) {
+      console.error('❌ Error deleting goal:', err);
+      alert("Error deleting goal: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Combine pinned and frequent activities (pinned take precedence, max 10 total)
+  const combinedActivities = [
+    ...pinnedCustomActivities,
+    ...frequentActivities.filter(
+      (freq) => !pinnedCustomActivities.some((pin) => pin.activityName === freq.activityName)
+    )
+  ].slice(0, 10);
 
   return (
-    <div style={{ maxWidth: 1000, width: '100%', margin: '40px auto', fontFamily: 'Arial, sans-serif', padding: '0 10px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+    <div style={{ maxWidth: '800px', margin: '40px auto', padding: '0 20px', fontFamily: 'Arial, sans-serif' }}>
+      {/* Hamburger Menu */}
+      <div style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 1000 }}>
         <button
           onClick={() => setShowHamburgerMenu(!showHamburgerMenu)}
           style={{
             padding: '10px',
-            backgroundColor: '#34495e',
+            backgroundColor: '#3498db',
             color: 'white',
             border: 'none',
             borderRadius: '8px',
             cursor: 'pointer',
-            fontSize: '18px'
+            fontSize: '16px'
           }}
         >
           ☰
         </button>
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <h1 style={{ margin: '0 0 10px 0', color: '#2c3e50' }}>🌍 EcoTrack</h1>
-          <p style={{ margin: 0, color: '#7f8c8d' }}>Track your daily environmental impact</p>
-        </div>
-        <div style={{ width: '50px' }}></div>
+        {showHamburgerMenu && (
+          <div style={{
+            position: 'absolute',
+            top: '50px',
+            left: '0',
+            backgroundColor: 'white',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+            borderRadius: '8px',
+            padding: '15px',
+            zIndex: 1000
+          }}>
+            <button
+              onClick={() => { setCurrentPage('main'); setShowHamburgerMenu(false); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px',
+                border: 'none',
+                background: currentPage === 'main' ? '#3498db' : 'transparent',
+                color: currentPage === 'main' ? 'white' : '#2c3e50',
+                textAlign: 'left',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                marginBottom: '5px'
+              }}
+            >
+              🏠 Dashboard
+            </button>
+            <button
+              onClick={() => { setCurrentPage('history'); setShowHamburgerMenu(false); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px',
+                border: 'none',
+                background: currentPage === 'history' ? '#3498db' : 'transparent',
+                color: currentPage === 'history' ? 'white' : '#2c3e50',
+                textAlign: 'left',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                marginBottom: '5px'
+              }}
+            >
+              📜 Goal History
+            </button>
+            <button
+              onClick={() => { setCurrentPage('activityLog'); setShowHamburgerMenu(false); }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px',
+                border: 'none',
+                background: currentPage === 'activityLog' ? '#3498db' : 'transparent',
+                color: currentPage === 'activityLog' ? 'white' : '#2c3e50',
+                textAlign: 'left',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px'
+              }}
+            >
+              📋 Activity Log
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Hamburger Menu */}
-      {showHamburgerMenu && (
+      {/* Goal Modal */}
+      {showGoalModal && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -390,311 +435,277 @@ function App() {
           right: 0,
           bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)',
-          zIndex: 1000
-        }} onClick={() => setShowHamburgerMenu(false)}>
-          <div style={{
-            position: 'absolute',
-            top: '80px',
-            left: '20px',
-            backgroundColor: 'white',
-            padding: '20px',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
-            minWidth: '200px'
-          }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 20px 0', color: '#2c3e50' }}>Menu</h3>
-            <button
-              onClick={() => {
-                setCurrentPage('main');
-                setShowHamburgerMenu(false);
-              }}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: currentPage === 'main' ? '#3498db' : '#ecf0f1',
-                color: currentPage === 'main' ? 'white' : '#2c3e50',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                marginBottom: '10px'
-              }}
-            >
-              🏠 Main Dashboard
-            </button>
-            <button
-              onClick={() => {
-                setCurrentPage('history');
-                setShowHamburgerMenu(false);
-              }}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: currentPage === 'history' ? '#3498db' : '#ecf0f1',
-                color: currentPage === 'history' ? 'white' : '#2c3e50',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                marginBottom: '10px'
-              }}
-            >
-              📚 Goal History
-            </button>
-            <button
-              onClick={() => {
-                setCurrentPage('log');
-                setShowHamburgerMenu(false);
-              }}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: currentPage === 'log' ? '#3498db' : '#ecf0f1',
-                color: currentPage === 'log' ? 'white' : '#2c3e50',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              📋 Activity Log
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for Adding Goal */}
-      {showGoalModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          zIndex: 2000,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          zIndex: 2000
         }}>
           <div style={{
-            background: 'white',
-            padding: '30px 25px',
-            borderRadius: '14px',
-            minWidth: 320,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-            position: 'relative'
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '400px',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
           }}>
-            <button
-              onClick={() => setShowGoalModal(false)}
-              style={{
-                position: 'absolute',
-                top: 10,
-                right: 10,
-                background: 'none',
-                border: 'none',
-                fontSize: 20,
-                cursor: 'pointer',
-                color: '#888'
-              }}
-              aria-label="Close"
-            >✖️</button>
-            <h2 style={{ marginTop: 0, color: '#2c3e50', marginBottom: 18 }}>Add New Goal</h2>
-            <form onSubmit={createGoal}>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', marginBottom: 6, color: '#555', fontSize: 14 }}>Target Points</label>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🎯 Set New Goal</h2>
+            <form onSubmit={handleGoalSubmit}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
+                  Target Points
+                </label>
                 <input
                   type="number"
-                  min="1"
-                  required
                   value={newGoal.targetPoints}
-                  onChange={e => setNewGoal({ ...newGoal, targetPoints: e.target.value })}
-                  style={{ width: '100%', padding: 10, border: '2px solid #ddd', borderRadius: 8, fontSize: 15 }}
+                  onChange={(e) => setNewGoal({ ...newGoal, targetPoints: e.target.value })}
+                  placeholder="Enter points (e.g., 50)"
+                  style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 />
               </div>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', marginBottom: 6, color: '#555', fontSize: 14 }}>Goal Type</label>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
+                  Goal Type
+                </label>
                 <select
                   value={newGoal.goalType}
-                  onChange={e => {
-                    const type = e.target.value;
-                    setNewGoal({
-                      ...newGoal,
-                      goalType: type,
-                      endDate: getEndDateForGoalType(type)
-                    });
+                  onChange={(e) => {
+                    const goalType = e.target.value;
+                    setNewGoal({ ...newGoal, goalType, endDate: getEndDateForGoalType(goalType) });
                   }}
-                  style={{ width: '100%', padding: 10, border: '2px solid #ddd', borderRadius: 8, fontSize: 15 }}
+                  style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
               </div>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', marginBottom: 6, color: '#555', fontSize: 14 }}>End Date</label>
-                <div style={{
-                  width: '100%',
-                  padding: 10,
-                  border: '2px solid #eee',
-                  borderRadius: 8,
-                  fontSize: 15,
-                  background: '#f8f9fa'
-                }}>
-                  {newGoal.endDate}
-                </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={newGoal.endDate}
+                  onChange={(e) => setNewGoal({ ...newGoal, endDate: e.target.value })}
+                  style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
+                />
               </div>
-              <button
-                type="submit"
-                style={{
-                  width: '100%',
-                  padding: '12px 0',
-                  backgroundColor: '#27ae60',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 8,
-                  fontSize: 16,
-                  fontWeight: 'bold',
-                  cursor: 'pointer'
-                }}
-              >
-                Add Goal
-              </button>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#27ae60',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Set Goal
+                </button>
+                <button
+                  type="button"
+                  onClick={closeGoalModal}
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    backgroundColor: '#e74c3c',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Page Content */}
       {currentPage === 'main' ? (
         <>
-          {/* Score Tracker */}
-          <div style={{
-            background: 'linear-gradient(135deg, #74b9ff, #0984e3)',
-            padding: '20px',
-            borderRadius: '15px',
-            textAlign: 'center',
-            marginBottom: '30px',
-            fontSize: '24px',
-            fontWeight: 'bold',
-            color: 'white',
-            boxShadow: '0 6px 20px rgba(116, 185, 255, 0.3)'
-          }}>
-            🌍 Your Eco Score: 
-            <span style={{ 
-              color: totalScore >= 0 ? '#00ff88' : '#ff6b6b', 
-              marginLeft: '15px',
-              fontSize: '28px'
-            }}>
-              {totalScore}
-            </span>
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <h1 style={{ color: '#2c3e50', fontSize: '28px', marginBottom: '10px' }}>
+              🌍 EcoTrack Dashboard
+            </h1>
+            <p style={{ color: '#7f8c8d', fontSize: '16px' }}>
+              Your Total Eco Points: <strong style={{ color: totalScore >= 0 ? '#27ae60' : '#e74c3c' }}>{totalScore}</strong>
+            </p>
           </div>
 
-          {/* Pinned Custom Activities */}
-          {pinnedCustomActivities.length > 0 && (
-            <div style={{ marginBottom: '40px' }}>
-              <h2 style={{ color: '#f1c40f', marginBottom: '20px' }}>📌 Pinned Custom Activities</h2>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                {pinnedCustomActivities.map((p, idx) => (
-                  <div key={`pinned-${idx}`} style={{ position: 'relative' }}>
-                    <ActivityBox
-                      activity={p.activityName}
-                      points={p.points}
-                      emoji={p.emoji || '✨'}
-                      category={p.category}
-                      onClick={logPredefined}
-                    />
+          {/* Pinned and Frequent Activities Section */}
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>📌 Pinned & Frequent Activities</h2>
+            {combinedActivities.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '30px',
+                color: '#666',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '12px',
+                border: '2px dashed #ddd'
+              }}>
+                <div style={{ fontSize: '36px', marginBottom: '15px' }}>📌</div>
+                <p style={{ fontSize: '16px', marginBottom: '10px' }}>No pinned or frequent activities yet!</p>
+                <p style={{ fontSize: '14px' }}>Pin activities from the Activity Log or perform activities multiple times to see them here.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                {combinedActivities.map((activity, index) => {
+                  const isPinned = pinnedCustomActivities.some(
+                    (pin) => pin.activityName === activity.activityName
+                  );
+                  return (
                     <button
-                      onClick={() => unpinCustomActivity(p.activityName)}
+                      key={index}
+                      onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
                       style={{
-                        position: 'absolute',
-                        top: 4,
-                        right: 4,
-                        background: '#e74c3c',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '50%',
-                        width: 24,
-                        height: 24,
+                        padding: '15px',
+                        backgroundColor: activity.points >= 0 ? '#e8f5e8' : '#f8d7da',
+                        border: `2px solid ${activity.points >= 0 ? '#27ae60' : '#c0392b'}`,
+                        borderRadius: '12px',
                         cursor: 'pointer',
-                        fontSize: 14,
-                        lineHeight: '24px',
-                        padding: 0
+                        textAlign: 'left',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
                       }}
-                      title="Unpin"
-                    >✖️</button>
-                  </div>
+                    >
+                      <span style={{ fontSize: '20px' }}>{activity.emoji || '✨'}</span>
+                      <div>
+                        <strong>{activity.activityName}</strong>
+                        <div style={{ color: activity.points >= 0 ? '#27ae60' : '#c0392b', fontWeight: 'bold' }}>
+                          {activity.points >= 0 ? `+${activity.points}` : activity.points} points
+                        </div>
+                        <small style={{ color: '#666' }}>{activity.category}</small>
+                        {isPinned && (
+                          <span style={{
+                            backgroundColor: '#f1c40f',
+                            color: '#2c3e50',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            marginLeft: '5px'
+                          }}>
+                            📌 Pinned
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Predefined Activities */}
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🌟 Predefined Activities</h2>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ color: '#27ae60', marginBottom: '15px' }}>Positive Actions</h3>
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                {positiveActivities.map((activity, index) => (
+                  <button
+                    key={index}
+                    onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+                    style={{
+                      padding: '15px',
+                      backgroundColor: '#e8f5e8',
+                      border: '2px solid #27ae60',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+                    <div>
+                      <strong>{activity.activity}</strong>
+                      <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                        +{activity.points} points
+                      </div>
+                      <small style={{ color: '#666' }}>{activity.category}</small>
+                    </div>
+                  </button>
                 ))}
               </div>
             </div>
-          )}
-
-          {/* Positive Activities */}
-          <div style={{ marginBottom: '40px' }}>
-            <h2 style={{ color: '#27ae60', marginBottom: '20px' }}>🌟 Positive Activities</h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              {positiveActivities.map((p, idx) => (
-                <ActivityBox
-                  key={`positive-${idx}`}
-                  activity={p.activity}
-                  points={p.points}
-                  emoji={p.emoji}
-                  category={p.category}
-                  onClick={logPredefined}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Negative Activities */}
-          <div style={{ marginBottom: '40px' }}>
-            <h2 style={{ color: '#c0392b', marginBottom: '20px' }}>⚠️ Negative Activities</h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              {negativeActivities.map((n, idx) => (
-                <ActivityBox
-                  key={`negative-${idx}`}
-                  activity={n.activity}
-                  points={n.points}
-                  emoji={n.emoji}
-                  category={n.category}
-                  onClick={logPredefined}
-                />
-              ))}
+            <div>
+              <h3 style={{ color: '#c0392b', marginBottom: '15px' }}>Negative Actions</h3>
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                {negativeActivities.map((activity, index) => (
+                  <button
+                    key={index}
+                    onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+                    style={{
+                      padding: '15px',
+                      backgroundColor: '#f8d7da',
+                      border: '2px solid #c0392b',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+                    <div>
+                      <strong>{activity.activity}</strong>
+                      <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
+                        {activity.points} points
+                      </div>
+                      <small style={{ color: '#666' }}>{activity.category}</small>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           {/* Custom Activity Form */}
-          <div style={{
-            backgroundColor: '#f8f9fa',
-            padding: '25px',
-            borderRadius: '15px',
-            marginBottom: '40px',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
-          }}>
-            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>✨ Add Custom Activity</h2>
-            <form onSubmit={handleCustomSubmit} style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'end' }}>
-              <div style={{ flex: '2', minWidth: '200px' }}>
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>✍️ Log Custom Activity</h2>
+            <form onSubmit={handleCustomSubmit} style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+              <div>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Activity Name
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Used solar energy"
+                  placeholder="e.g., Used reusable bag"
                   value={customActivity}
                   onChange={(e) => setCustomActivity(e.target.value)}
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 />
               </div>
-              <div style={{ flex: '1', minWidth: '100px' }}>
+              <div>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Points
                 </label>
                 <input
                   type="number"
-                  placeholder="Points"
+                  placeholder="e.g., 5 or -5"
                   value={customPoints}
                   onChange={(e) => setCustomPoints(e.target.value)}
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 />
               </div>
-              <div style={{ flex: '1', minWidth: '100px' }}>
+              <div style={{ maxWidth: '150px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Category
                 </label>
@@ -703,12 +714,12 @@ function App() {
                   onChange={(e) => setCustomCategory(e.target.value)}
                   style={{ width: '100%', padding: '12px', border: '2px solid #ddd', borderRadius: '8px', fontSize: '14px' }}
                 >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
+                  {categories.map((cat, index) => (
+                    <option key={index} value={cat}>{cat}</option>
                   ))}
                 </select>
               </div>
-              <div style={{ flex: '1', minWidth: '100px' }}>
+              <div style={{ maxWidth: '100px' }}>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
                   Emoji (optional)
                 </label>
@@ -775,7 +786,7 @@ function App() {
             ) : (
               <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
                 {goals
-                  .filter(goal => !goal.isArchived) // Only show non-archived goals
+                  .filter(goal => !goal.isArchived)
                   .map((goal) => {
                     const progress = Math.min((goal.currentPoints / goal.targetPoints) * 100, 100);
                     const isCompleted = goal.isCompleted;

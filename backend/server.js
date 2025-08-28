@@ -51,6 +51,74 @@ app.get('/api/activities', async (req, res) => {
   }
 });
 
+// GET: list activities by user ID
+app.get('/api/activities/:userId', async (req, res) => {
+  try {
+    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: -1 });
+    res.json(activities);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
+  }
+});
+
+// GET: list frequent activities for a user (more than 3 times in a day)
+app.get('/api/activities/:userId/frequent', async (req, res) => {
+  try {
+    console.log('📊 Fetching frequent activities for user:', req.params.userId);
+    
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const frequentActivities = await Activity.aggregate([
+      {
+        $match: {
+          userId: req.params.userId,
+          date: { $gte: startOfDay, $lte: endOfDay }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            activityName: "$activityName",
+            category: "$category",
+            points: "$points",
+            type: "$type",
+            emoji: "$emoji"
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $match: {
+          count: { $gt: 3 }
+        }
+      },
+      {
+        $project: {
+          activityName: "$_id.activityName",
+          category: "$_id.category",
+          points: "$_id.points",
+          type: "$_id.type",
+          emoji: "$_id.emoji",
+          count: 1,
+          _id: 0
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ]);
+
+    console.log(`Found ${frequentActivities.length} frequent activities`);
+    res.json(frequentActivities);
+  } catch (err) {
+    console.error('❌ Error fetching frequent activities:', err);
+    res.status(500).json({ error: 'Failed to fetch frequent activities', details: err.message });
+  }
+});
+
 // POST: add a new activity
 app.post('/api/activities', async (req, res) => {
   try {
@@ -417,13 +485,3 @@ setInterval(async () => {
 
 const badgeRoutes = require('./routes/badgeRoutes');
 app.use('/api/badges', badgeRoutes);
-
-// GET: list activities by user ID
-app.get('/api/activities/:userId', async (req, res) => {
-  try {
-    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: -1 });
-    res.json(activities);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch activities', details: err.message });
-  }
-});
