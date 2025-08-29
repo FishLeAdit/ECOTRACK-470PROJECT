@@ -5,6 +5,7 @@ import BadgeNotification from './components/BadgeNotification';
 import BadgeDisplay from './components/BadgeDisplay';
 import ProgressCharts from './components/ProgressCharts';
 import ActivityLog from './components/ActivityLog';
+import Recommendations from './components/Recommendations';
 
 function PinnedFrequentActivities({ pinnedCustomActivities, frequentActivities, logPredefined }) {
   const combinedActivities = [
@@ -106,12 +107,19 @@ function App() {
   const [pinnedCustomActivities, setPinnedCustomActivities] = useState([]);
   const [completedGoal, setCompletedGoal] = useState(null);
   const [showGoalCompleteNotification, setShowGoalCompleteNotification] = useState(false);
+  const [recommendations, setRecommendations] = useState({
+  generalAdvice: '',
+  activitySuggestions: []
+  });
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
+  const [lastRecommendationUpdate, setLastRecommendationUpdate] = useState(null);
+  const [cacheStatus, setCacheStatus] = useState({});
 
-  // Categories
-  const categories = [
-    'General',
-    'Transportation',
-    'Energy',
+// Categories
+const categories = [
+  'General',
+  'Transportation',
+  'Energy',
     'Waste',
     'Food',
     'Water',
@@ -162,6 +170,7 @@ function App() {
     fetchFrequentActivities();
     fetchGoals();
     fetchPinnedActivities();
+    fetchRecommendations();
   }, []);
 
   // Fetch pinned activities from backend
@@ -433,6 +442,64 @@ function App() {
     } catch (err) {
       console.error('Error deleting goal:', err);
       alert("Error deleting goal: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Fetch Recommendations
+  const fetchRecommendations = async () => {
+  setLoadingRecommendations(true);
+    try {
+      const response = await axios.get('http://localhost:5000/api/recommendations/default_user');
+      setRecommendations(response.data);
+      setLastRecommendationUpdate(new Date());
+
+      const statusResponse = await axios.get('http://localhost:5000/api/recommendations/status/default_user/cache-status');
+      setCacheStatus(statusResponse.data);
+    } catch (err) {
+      console.error('Error fetching recommendations:', err);
+      // You might want to set some fallback recommendations here
+      setRecommendations({
+        generalAdvice: "We're having trouble generating recommendations right now. Keep tracking your eco-activities!",
+        activitySuggestions: []
+      });
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  };
+
+  // Manual Refresh Function
+  const  refreshRecommendations = async () => {
+    setLoadingRecommendations(true);
+    try {
+      const response = await axios.post('http://localhost:5000/api/recommendations/default_user/refresh');
+        setRecommendations(response.data.recommendations);
+        setLastRecommendationUpdate(new Date());
+
+        const statusResponse = await axios.get('http://localhost:5000/api/recommendations/default_user/cache-status');
+        setCacheStatus(statusResponse.data);
+        alert('Recommendations refreshed succesfully');
+    } catch (err) {
+      console.error("Error refreshing recommendations:", err);
+      alert("Error refreshing recommendations: " + (err.response?.data?.error || err.message));
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  };
+  
+
+  // Pin Suggested Activities
+  const pinSuggestedActivity = async (activity) => {
+    try {
+      await pinCustomActivity(activity);
+      // Remove the pinned activity from suggestions
+      setRecommendations(prev => ({
+        ...prev,
+        activitySuggestions: prev.activitySuggestions.filter(a => 
+          a.activityName !== activity.activityName
+        )
+      }));
+    } catch (err) {
+      console.error('Error pinning suggested activity:', err);
     }
   };
 
@@ -1045,6 +1112,18 @@ function App() {
               </div>
             )}
           </div>
+
+          {/* Gemini Recommendations */}
+          <Recommendations
+           recommendations={recommendations}
+           loadingRecommendations={loadingRecommendations}
+           onPinSuggestion={pinSuggestedActivity}
+           lastUpdate = {lastRecommendationUpdate}
+           cacheStatus = {cacheStatus}
+           onRefresh = {refreshRecommendations}
+          />
+          
+
 
           {/* Badge Display */}
           <BadgeDisplay userId="default_user" showStats={true} />

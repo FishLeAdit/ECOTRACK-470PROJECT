@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
+const GeminiService = require('./services/GeminiService');
 
 // --- MODELS ---
 const Activity = require('./models/activity');
@@ -425,6 +426,63 @@ app.get('/api/leaderboard/badges', async (req, res) => {
   } catch (err) {
     console.error('❌ Error fetching leaderboard:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/recommendations/:userId', async (req, res) => {
+  try {
+    console.log('🤖 Fetching Gemini recommendations for user:', req.params.userId);
+    const recommendations = await GeminiService.generateRecommendations(req.params.userId);
+    res.json(recommendations);
+  } catch (err) {
+    console.error('❌ Error fetching recommendations:', err);
+    res.status(500).json({ error: 'Failed to generate recommendations', details: err.message });
+  }
+});
+
+app.get('/api/recommendations/:userId/cache-status', async (req, res) => {
+  try {
+    const cacheKey = `recommendations:${req.params.userId}`;
+    const cachedData = recommendationCache.get(cacheKey);
+    
+    if (!cachedData) {
+      return res.json({ 
+        hasCache: false,
+        message: 'No cached recommendations found for this user'
+      });
+    }
+    
+    const ageInMinutes = Math.floor((Date.now() - cachedData.timestamp) / (60 * 1000));
+    const expiresInMinutes = 60 - ageInMinutes;
+    
+    res.json({
+      hasCache: true,
+      cacheAge: `${ageInMinutes} minutes`,
+      expiresIn: `${expiresInMinutes} minutes`,
+      willRefresh: expiresInMinutes <= 0
+    });
+  } catch (err) {
+    console.error('❌ Error checking cache status:', err);
+    res.status(500).json({ error: 'Failed to check cache status', details: err.message });
+  }
+});
+
+// Add this route to manually refresh recommendations
+app.post('/api/recommendations/:userId/refresh', async (req, res) => {
+  try {
+    // Clear the cache to force a fresh API call
+    GeminiService.clearCacheForUser(req.params.userId);
+    
+    // Generate new recommendations
+    const recommendations = await GeminiService.generateRecommendations(req.params.userId);
+    
+    res.json({
+      message: 'Recommendations refreshed successfully',
+      recommendations
+    });
+  } catch (err) {
+    console.error('❌ Error refreshing recommendations:', err);
+    res.status(500).json({ error: 'Failed to refresh recommendations', details: err.message });
   }
 });
 
