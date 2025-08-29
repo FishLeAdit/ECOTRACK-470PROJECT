@@ -218,7 +218,7 @@ app.post('/api/pinned-activities', async (req, res) => {
       userId,
       activityName,
       points,
-      category: category || 'General',
+      category: category,  // Remove the || 'General' override
       emoji: emoji || ''
     });
     await newPinnedActivity.save();

@@ -14,11 +14,9 @@ function PinnedFrequentActivities({ pinnedCustomActivities, frequentActivities, 
     )
   ].slice(0, 10);
 
-  console.log('📌 Rendering PinnedFrequentActivities:', { pinnedCustomActivities, combinedActivities });
-
   return (
     <div style={{ marginBottom: '40px' }}>
-      <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>📌 Pinned & Frequent Activities</h2>
+      <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>Pinned & Frequent Activities</h2>
       {combinedActivities.length === 0 ? (
         <div style={{
           textAlign: 'center',
@@ -158,16 +156,6 @@ function App() {
     return today.toISOString().split('T')[0];
   }
 
-  // Track navigation changes
-  useEffect(() => {
-    console.log('🚀 Navigation changed to:', currentPage, 'Pinned activities:', pinnedCustomActivities);
-  }, [currentPage, pinnedCustomActivities]);
-
-  // Debug pinned activities
-  useEffect(() => {
-    console.log('📌 Pinned Custom Activities updated:', pinnedCustomActivities);
-  }, [pinnedCustomActivities]);
-
   // Fetch data on component mount
   useEffect(() => {
     fetchActivities();
@@ -179,12 +167,10 @@ function App() {
   // Fetch pinned activities from backend
   const fetchPinnedActivities = async () => {
     try {
-      console.log('📌 Fetching pinned activities from: http://localhost:5000/api/pinned-activities/default_user');
       const response = await axios.get('http://localhost:5000/api/pinned-activities/default_user');
-      console.log('📌 Pinned activities response:', response.data);
       setPinnedCustomActivities(response.data);
     } catch (err) {
-      console.error('❌ Error fetching pinned activities:', err);
+      console.error('Error fetching pinned activities:', err);
       alert('Error fetching pinned activities: ' + (err.response?.data?.error || err.message));
     }
   };
@@ -193,11 +179,10 @@ function App() {
   const fetchActivities = async () => {
     try {
       const response = await axios.get('http://localhost:5000/api/activities/default_user');
-      console.log('📖 Fetched activities:', response.data);
       setActivities(response.data);
       calculateScore(response.data);
     } catch (err) {
-      console.error('❌ Error fetching activities:', err);
+      console.error('Error fetching activities:', err);
       alert('Error fetching activities: ' + (err.response?.data?.error || err.message));
     }
   };
@@ -205,24 +190,12 @@ function App() {
   // Fetch frequent activities from backend
   const fetchFrequentActivities = async () => {
     try {
-      console.log('📊 Fetching frequent activities from: http://localhost:5000/api/activities/default_user/frequent');
       const response = await axios.get('http://localhost:5000/api/activities/default_user/frequent');
-      console.log('📊 Frequent activities response:', response.data);
       setFrequentActivities(response.data);
     } catch (err) {
-      console.error('❌ Error fetching frequent activities:', {
-        message: err.message,
-        status: err.response?.status,
-        data: err.response?.data
-      });
+      console.error('Error fetching frequent activities:', err);
       alert('Error fetching frequent activities: ' + (err.response?.data?.error || err.message));
     }
-  };
-
-  // Calculate total score
-  const calculateScore = (data) => {
-    const sum = data.reduce((acc, curr) => acc + curr.points, 0);
-    setTotalScore(sum);
   };
 
   // Fetch goals from backend
@@ -231,9 +204,15 @@ function App() {
       const response = await axios.get('http://localhost:5000/api/goals/default_user');
       setGoals(response.data);
     } catch (err) {
-      console.error('❌ Error fetching goals:', err);
+      console.error('Error fetching goals:', err);
       alert('Failed to load goals');
     }
+  };
+
+  // Calculate total score
+  const calculateScore = (data) => {
+    const sum = data.reduce((acc, curr) => acc + curr.points, 0);
+    setTotalScore(sum);
   };
 
   // Log predefined activity
@@ -255,8 +234,9 @@ function App() {
       await fetchActivities();
       await fetchFrequentActivities();
       await fetchGoals();
+      await fetchPinnedActivities();
     } catch (err) {
-      console.error('❌ Error adding predefined activity:', err);
+      console.error('Error adding predefined activity:', err);
       alert("Error adding activity: " + (err.response?.data?.error || err.message));
     }
   };
@@ -283,12 +263,13 @@ function App() {
       await fetchActivities();
       await fetchFrequentActivities();
       await fetchGoals();
+      await fetchPinnedActivities();
       setCustomActivity('');
       setCustomPoints('');
       setCustomEmoji('');
       setCustomCategory('General');
     } catch (err) {
-      console.error('❌ Error adding custom activity:', err);
+      console.error('Error adding custom activity:', err);
       alert("Error adding custom activity: " + (err.response?.data?.error || err.message));
     }
   };
@@ -296,44 +277,39 @@ function App() {
   // Pin custom activity
   const pinCustomActivity = async (activity) => {
     try {
-      console.log('📌 Pinning activity:', activity);
       const payload = {
         userId: 'default_user',
         activityName: activity.activityName,
         points: activity.points,
-        category: activity.category || 'General',
+        category: activity.category,
         emoji: activity.emoji || ''
       };
       const response = await axios.post('http://localhost:5000/api/pinned-activities', payload);
-      console.log('📌 Pinned activity response:', response.data);
       setPinnedCustomActivities((prev) => {
         if (prev.some(item => item.activityName === activity.activityName)) {
-          console.log('📌 Activity already pinned, skipping:', activity.activityName);
           return prev;
         }
         const newPinned = [...prev, response.data];
-        const uniquePinned = newPinned.slice(0, 10); // Limit to 10
-        console.log('📌 Updated pinned activities:', uniquePinned);
-        return uniquePinned;
+        return newPinned.slice(0, 10);
       });
+      await fetchPinnedActivities();
     } catch (err) {
-      console.error('❌ Error pinning activity:', err);
+      console.error('Error pinning activity:', err);
       alert('Error pinning activity: ' + (err.response?.data?.error || err.message));
     }
+    
   };
 
   // Unpin custom activity
   const unpinCustomActivity = async (activityName) => {
     try {
-      console.log('📌 Unpinning activity:', activityName);
       await axios.delete(`http://localhost:5000/api/pinned-activities/default_user/${encodeURIComponent(activityName)}`);
       setPinnedCustomActivities((prev) => {
-        const updated = prev.filter(a => a.activityName !== activityName);
-        console.log('📌 Updated pinned activities after unpin:', updated);
-        return updated;
+        return prev.filter(a => a.activityName !== activityName);
       });
+      await fetchPinnedActivities();
     } catch (err) {
-      console.error('❌ Error unpinning activity:', err);
+      console.error('Error unpinning activity:', err);
       alert('Error unpinning activity: ' + (err.response?.data?.error || err.message));
     }
   };
@@ -343,8 +319,6 @@ function App() {
     try {
       const response = await axios.get('http://localhost:5000/api/goals/default_user');
       const updatedGoals = response.data;
-      console.log('Goals before update:', updatedGoals);
-
       const completedGoals = [];
 
       for (const goal of updatedGoals) {
@@ -362,7 +336,6 @@ function App() {
           if (isCompleted) {
             await axios.put(`http://localhost:5000/api/goals/${goal._id}/archive`);
             completedGoals.push({ ...goal, currentPoints: newPoints });
-            console.log('Completed goal:', goal._id);
           }
         }
       }
@@ -377,7 +350,6 @@ function App() {
           const goal = completedGoals[index];
           setCompletedGoal(goal);
           setShowGoalCompleteNotification(true);
-          console.log('Showing notification for goal:', goal._id);
 
           setTimeout(() => {
             setShowGoalCompleteNotification(false);
@@ -391,7 +363,7 @@ function App() {
         await fetchGoals();
       }
     } catch (err) {
-      console.error('❌ Error updating goals:', err);
+      console.error('Error updating goals:', err);
       alert("Error updating goals: " + (err.response?.data?.error || err.message));
     }
   };
@@ -434,7 +406,7 @@ function App() {
       await fetchGoals();
       closeGoalModal();
     } catch (err) {
-      console.error('❌ Error adding goal:', err);
+      console.error('Error adding goal:', err);
       alert("Error adding goal: " + (err.response?.data?.error || err.message));
     }
   };
@@ -446,8 +418,9 @@ function App() {
       await fetchActivities();
       await fetchFrequentActivities();
       await fetchGoals();
+      await fetchPinnedActivities();
     } catch (err) {
-      console.error('❌ Error deleting activity:', err);
+      console.error('Error deleting activity:', err);
       alert("Error deleting activity: " + (err.response?.data?.error || err.message));
     }
   };
@@ -458,7 +431,7 @@ function App() {
       await axios.delete(`http://localhost:5000/api/goals/${id}`);
       await fetchGoals();
     } catch (err) {
-      console.error('❌ Error deleting goal:', err);
+      console.error('Error deleting goal:', err);
       alert("Error deleting goal: " + (err.response?.data?.error || err.message));
     }
   };
@@ -496,7 +469,6 @@ function App() {
               onClick={() => {
                 setCurrentPage('main');
                 setShowHamburgerMenu(false);
-                console.log('🏠 Navigating to main, pinned activities:', pinnedCustomActivities);
               }}
               style={{
                 display: 'block',
@@ -518,7 +490,6 @@ function App() {
               onClick={() => {
                 setCurrentPage('history');
                 setShowHamburgerMenu(false);
-                console.log('📜 Navigating to history, pinned activities:', pinnedCustomActivities);
               }}
               style={{
                 display: 'block',
@@ -540,7 +511,6 @@ function App() {
               onClick={() => {
                 setCurrentPage('activityLog');
                 setShowHamburgerMenu(false);
-                console.log('📋 Navigating to activityLog, pinned activities:', pinnedCustomActivities);
               }}
               style={{
                 display: 'block',
@@ -665,22 +635,6 @@ function App() {
         </div>
       )}
 
-      {/* Debug Button for Pinned Activities */}
-      <button
-        onClick={() => console.log('📌 Current Pinned Activities:', pinnedCustomActivities)}
-        style={{
-          padding: '10px 20px',
-          backgroundColor: '#3498db',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          margin: '20px 0'
-        }}
-      >
-        Log Pinned Activities
-      </button>
-
       {currentPage === 'main' ? (
         <div>
           {/* Header */}
@@ -700,78 +654,212 @@ function App() {
             logPredefined={logPredefined}
           />
 
-          {/* Predefined Activities */}
-          <div style={{ marginBottom: '40px' }}>
-            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🌟 Predefined Activities</h2>
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ color: '#27ae60', marginBottom: '15px' }}>Positive Actions</h3>
-              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-                {positiveActivities.map((activity, index) => (
-                  <button
-                    key={index}
-                    onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
-                    style={{
-                      padding: '15px',
-                      backgroundColor: '#e8f5e8',
-                      border: '2px solid #27ae60',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px'
-                    }}
-                  >
-                    <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
-                    <div>
-                      <strong>{activity.activity}</strong>
-                      <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
-                        +{activity.points} points
-                      </div>
-                      <small style={{ color: '#666' }}>{activity.category}</small>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+          {/* Activities Section */}
+<div style={{ marginBottom: '40px' }}>
+  <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🌟 Activities</h2>
+  
+  {/* Positive Actions */}
+  <div style={{ marginBottom: '20px' }}>
+    <h3 style={{ color: '#27ae60', marginBottom: '15px' }}>Positive Actions</h3>
+    <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      {positiveActivities.map((activity, index) => {
+        const isPinned = pinnedCustomActivities.some(
+          (pin) => pin.activityName === activity.activity
+        );
+        
+        return (
+          <button
+            key={index}
+            onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+            style={{
+              padding: '15px',
+              backgroundColor: '#e8f5e8',
+              border: '2px solid #27ae60',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
             <div>
-              <h3 style={{ color: '#c0392b', marginBottom: '15px' }}>Negative Actions</h3>
-              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-                {negativeActivities.map((activity, index) => (
-                  <button
-                    key={index}
-                    onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
-                    style={{
-                      padding: '15px',
-                      backgroundColor: '#f8d7da',
-                      border: '2px solid #c0392b',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px'
-                    }}
-                  >
-                    <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
-                    <div>
-                      <strong>{activity.activity}</strong>
-                      <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
-                        {activity.points} points
-                      </div>
-                      <small style={{ color: '#666' }}>{activity.category}</small>
-                    </div>
-                  </button>
-                ))}
+              <strong>{activity.activity}</strong>
+              <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                +{activity.points} points
               </div>
+              <small style={{ color: '#666' }}>{activity.category}</small>
+              {isPinned && (
+                <span style={{
+                  backgroundColor: '#f1c40f',
+                  color: '#2c3e50',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '10px',
+                  marginLeft: '5px'
+                }}>
+                  📌 Pinned
+                </span>
+              )}
             </div>
-          </div>
+          </button>
+        );
+      })}
+      
+      {/* Pinned positive custom activities */}
+      {pinnedCustomActivities
+        .filter(pin => pin.points > 0 && !positiveActivities.some(pa => pa.activity === pin.activityName))
+        .map((activity, index) => {
+          const isPinned = true;
+          
+          return (
+            <button
+              key={`pinned-${index}`}
+              onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
+              style={{
+                padding: '15px',
+                backgroundColor: '#e8f5e8',
+                border: '2px solid #27ae60',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>{activity.emoji || '✨'}</span>
+              <div>
+                <strong>{activity.activityName}</strong>
+                <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                  +{activity.points} points
+                </div>
+                <small style={{ color: '#666' }}>{activity.category}</small>
+                {isPinned && (
+                  <span style={{
+                    backgroundColor: '#f1c40f',
+                    color: '#2c3e50',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    marginLeft: '5px'
+                  }}>
+                    📌 Pinned
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+    </div>
+  </div>
+  
+  {/* Negative Actions */}
+  <div>
+    <h3 style={{ color: '#c0392b', marginBottom: '15px' }}>Negative Actions</h3>
+    <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      {negativeActivities.map((activity, index) => {
+        const isPinned = pinnedCustomActivities.some(
+          (pin) => pin.activityName === activity.activity
+        );
+        
+        return (
+          <button
+            key={index}
+            onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+            style={{
+              padding: '15px',
+              backgroundColor: '#f8d7da',
+              border: '2px solid #c0392b',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+            <div>
+              <strong>{activity.activity}</strong>
+              <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
+                {activity.points} points
+              </div>
+              <small style={{ color: '#666' }}>{activity.category}</small>
+              {isPinned && (
+                <span style={{
+                  backgroundColor: '#f1c40f',
+                  color: '#2c3e50',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '10px',
+                  marginLeft: '5px'
+                }}>
+                  📌 Pinned
+                </span>
+              )}
+            </div>
+          </button>
+        );
+      })}
+      
+      {/* Pinned negative custom activities */}
+      {pinnedCustomActivities
+        .filter(pin => pin.points < 0 && !negativeActivities.some(na => na.activity === pin.activityName))
+        .map((activity, index) => {
+          const isPinned = true;
+          
+          return (
+            <button
+              key={`pinned-neg-${index}`}
+              onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
+              style={{
+                padding: '15px',
+                backgroundColor: '#f8d7da',
+                border: '2px solid #c0392b',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}
+            >
+              <span style={{ fontSize: '20px' }}>{activity.emoji || '⚠️'}</span>
+              <div>
+                <strong>{activity.activityName}</strong>
+                <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
+                  {activity.points} points
+                </div>
+                <small style={{ color: '#666' }}>{activity.category}</small>
+                {isPinned && (
+                  <span style={{
+                    backgroundColor: '#f1c40f',
+                    color: '#2c3e50',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    marginLeft: '5px'
+                  }}>
+                    📌 Pinned
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+    </div>
+  </div>
+</div>
 
           {/* Custom Activity Form */}
           <div style={{ marginBottom: '40px' }}>
-            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>✍️ Log Custom Activity</h2>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>✏️ Log Custom Activity</h2>
             <form onSubmit={handleCustomSubmit} style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
               <div>
                 <label style={{ display: 'block', marginBottom: '5px', color: '#555', fontSize: '14px' }}>
@@ -967,7 +1055,6 @@ function App() {
       ) : currentPage === 'history' ? (
         <GoalHistory onBack={() => {
           setCurrentPage('main');
-          console.log('🏠 Navigating back to main from history, pinned activities:', pinnedCustomActivities);
         }} />
       ) : (
         <ActivityLog 
