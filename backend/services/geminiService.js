@@ -7,7 +7,14 @@ const recommendationCache = new Map();
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  }
+
+  // Add this method to clear cache for a specific user
+  clearCacheForUser(userId) {
+    const cacheKey = `recommendations:${userId}`;
+    recommendationCache.delete(cacheKey);
+    console.log('🤖 Cleared recommendations cache for user:', userId);
   }
 
   async generateRecommendations(userId) {
@@ -42,22 +49,42 @@ class GeminiService {
       // Prepare prompt for Gemini
       const prompt = this.createPrompt(activities);
       
-      // Generate content
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      // Generate content with retry logic for overloaded API
+      let retries = 3;
+      let lastError;
       
-      // Parse the response
-      const recommendations = this.parseGeminiResponse(text);
+      while (retries > 0) {
+        try {
+          const result = await this.model.generateContent(prompt);
+          const response = await result.response;
+          const text = response.text();
+          
+          // Parse the response
+          const recommendations = this.parseGeminiResponse(text);
+          
+          // Cache the result with timestamp
+          recommendationCache.set(cacheKey, {
+            timestamp: Date.now(),
+            recommendations
+          });
+          
+          console.log('🤖 New recommendations generated and cached for user:', userId);
+          return recommendations;
+        } catch (error) {
+          lastError = error;
+          retries--;
+          
+          if (error.status === 503 && retries > 0) {
+            console.log(`🤖 API overloaded, retrying in ${(4 - retries) * 2} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, (4 - retries) * 2000));
+          } else {
+            throw error;
+          }
+        }
+      }
       
-      // Cache the result with timestamp
-      recommendationCache.set(cacheKey, {
-        timestamp: Date.now(),
-        recommendations
-      });
+      throw lastError;
       
-      console.log('🤖 New recommendations generated and cached for user:', userId);
-      return recommendations;
     } catch (error) {
       console.error('Error generating Gemini recommendations:', error);
       
@@ -73,7 +100,11 @@ class GeminiService {
       // Fallback if no cache exists
       return {
         generalAdvice: "We're having trouble generating recommendations right now. Keep tracking your eco-activities!",
-        activitySuggestions: []
+        activitySuggestions: [
+          { activityName: "Use reusable shopping bags", points: 3, category: "Shopping", emoji: "🛍️" },
+          { activityName: "Meal prep to reduce food waste", points: 4, category: "Food", emoji: "🍲" },
+          { activityName: "Set thermostat 1 degree lower", points: 2, category: "Energy", emoji: "🌡️" }
+        ]
       };
     }
   }
@@ -159,9 +190,28 @@ class GeminiService {
     }
 
     return result;
-
-    
   }
+  getCacheStatus(userId) {
+  const cacheKey = `recommendations:${userId}`;
+  const cachedData = recommendationCache.get(cacheKey);
+  
+  if (!cachedData) {
+    return { 
+      hasCache: false,
+      message: 'No cached recommendations found for this user'
+    };
+  }
+  
+  const ageInMinutes = Math.floor((Date.now() - cachedData.timestamp) / (60 * 1000));
+  const expiresInMinutes = 60 - ageInMinutes;
+  
+  return {
+    hasCache: true,
+    cacheAge: `${ageInMinutes} minutes`,
+    expiresIn: `${expiresInMinutes} minutes`,
+    willRefresh: expiresInMinutes <= 0
+  };
+  } 
 }
 
 module.exports = new GeminiService();

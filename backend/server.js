@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
-const GeminiService = require('./services/GeminiService');
+const GeminiService = require('./services/geminiService');
 
 // --- MODELS ---
 const Activity = require('./models/activity');
@@ -11,6 +11,7 @@ const Goal = require('./models/goal');
 const Badge = require('./models/badge');
 const UserStats = require('./models/userStats');
 const PinnedActivity = require('./models/pinnedActivity'); // Added from second file
+const Settings = require('./models/settings');
 
 // --- SERVICES ---
 const BadgeService = require('./services/badgeService');
@@ -441,26 +442,9 @@ app.get('/api/recommendations/:userId', async (req, res) => {
 });
 
 app.get('/api/recommendations/:userId/cache-status', async (req, res) => {
-  try {
-    const cacheKey = `recommendations:${req.params.userId}`;
-    const cachedData = recommendationCache.get(cacheKey);
-    
-    if (!cachedData) {
-      return res.json({ 
-        hasCache: false,
-        message: 'No cached recommendations found for this user'
-      });
-    }
-    
-    const ageInMinutes = Math.floor((Date.now() - cachedData.timestamp) / (60 * 1000));
-    const expiresInMinutes = 60 - ageInMinutes;
-    
-    res.json({
-      hasCache: true,
-      cacheAge: `${ageInMinutes} minutes`,
-      expiresIn: `${expiresInMinutes} minutes`,
-      willRefresh: expiresInMinutes <= 0
-    });
+   try {
+    const cacheStatus = GeminiService.getCacheStatus(req.params.userId);
+    res.json(cacheStatus);
   } catch (err) {
     console.error('❌ Error checking cache status:', err);
     res.status(500).json({ error: 'Failed to check cache status', details: err.message });
@@ -514,3 +498,176 @@ setInterval(async () => {
     console.log('⚠️ Hourly goal refresh failed:', error.message);
   }
 }, 60 * 60 * 1000); // 1 hour
+
+// User Settings
+app.get('/api/settings/:userId', async (req, res) => {
+  try {
+    console.log('⚙️ Fetching settings for user:', req.params.userId);
+    let settings = await Settings.findOne({ userId: req.params.userId });
+    
+    if (!settings) {
+      // Create default settings if they don't exist
+      settings = new Settings({ userId: req.params.userId });
+      await settings.save();
+      console.log('✅ Created default settings for user');
+    }
+    
+    res.json(settings);
+  } catch (err) {
+    console.error('❌ Error fetching settings:', err);
+    res.status(500).json({ error: 'Failed to fetch settings', details: err.message });
+  }
+});
+
+// PUT: Update user settings
+app.put('/api/settings/:userId', async (req, res) => {
+  try {
+    console.log('⚙️ Updating settings for user:', req.params.userId);
+    const { notificationTime, notificationsEnabled } = req.body;
+    
+    const settings = await Settings.findOneAndUpdate(
+      { userId: req.params.userId },
+      { 
+        notificationTime: notificationTime || "18:00",
+        notificationsEnabled: notificationsEnabled !== undefined ? notificationsEnabled : true
+      },
+      { new: true, upsert: true }
+    );
+    
+    console.log('✅ Settings updated successfully');
+    res.json(settings);
+  } catch (err) {
+    console.error('❌ Error updating settings:', err);
+    res.status(500).json({ error: 'Failed to update settings', details: err.message });
+  }
+});
+
+// DELETE: Reset all user data
+app.delete('/api/reset-data/:userId', async (req, res) => {
+  try {
+    console.log('🔄 Resetting all data for user:', req.params.userId);
+    const userId = req.params.userId;
+    
+    // Delete all user data in parallel
+    await Promise.all([
+      Activity.deleteMany({ userId }),
+      Goal.deleteMany({ userId }),
+      Badge.deleteMany({ userId }),
+      UserStats.deleteMany({ userId }),
+      PinnedActivity.deleteMany({ userId }),
+      Settings.deleteMany({ userId })
+    ]);
+    
+    console.log('✅ All user data reset successfully');
+    res.json({ message: 'All user data has been reset successfully' });
+  } catch (err) {
+    console.error('❌ Error resetting user data:', err);
+    res.status(500).json({ error: 'Failed to reset user data', details: err.message });
+  }
+});
+
+// Notification Scheduler
+
+const checkAndSendNotifications = async () => {
+  try {
+    console.log('⏰ Checking for notifications to send...');
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5); // Get HH:MM
+    
+    // Find all users with notifications enabled and matching time
+    const usersToNotify = await Settings.find({
+      notificationsEnabled: true,
+      notificationTime: currentTime
+    });
+    
+    console.log(`📨 Found ${usersToNotify.length} users to notify at ${currentTime}`);
+    
+    for (const settings of usersToNotify) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      // Check if we already sent a notification today
+      if (settings.lastNotificationDate && 
+          new Date(settings.lastNotificationDate).toDateString() === today.toDateString()) {
+        console.log(`✅ Already sent notification to user ${settings.userId} today`);
+        continue;
+      }
+      
+      // Check yesterday's activities (to see if user was active yesterday)
+      const yesterdaysActivities = await Activity.countDocuments({
+        userId: settings.userId,
+        date: { 
+          $gte: yesterday,
+          $lt: today
+        }
+      });
+      
+      // Check today's activities
+      const todaysActivities = await Activity.countDocuments({
+        userId: settings.userId,
+        date: { $gte: today }
+      });
+      
+      let notificationMessage = '';
+      
+      if (yesterdaysActivities > 0 && todaysActivities === 0) {
+        // User was active yesterday but not today
+        notificationMessage = `Remember to add your activities for today! You were doing great yesterday with ${yesterdaysActivities} activities.`;
+      } else if (yesterdaysActivities === 0 && todaysActivities === 0) {
+        // User hasn't been active recently
+        notificationMessage = "Don't forget to track your eco-activities today! Every small action counts 🌱";
+      } else if (todaysActivities > 0) {
+        // User has been active today - remind for tomorrow
+        notificationMessage = "Great job tracking your activities today! Remember to add your activities tomorrow too 🎉";
+      }
+      
+      if (notificationMessage) {
+        console.log(`💡 Notification for user ${settings.userId}: ${notificationMessage}`);
+        
+        // Update last notification date
+        await Settings.findByIdAndUpdate(settings._id, {
+          lastNotificationDate: now
+        });
+        
+        // In a real app, send push notification or store for frontend to display
+        // For now, we'll store it in a simple in-memory store for the frontend to fetch
+        userNotifications.set(settings.userId, {
+          message: notificationMessage,
+          timestamp: now,
+          read: false
+        });
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error in notification scheduler:', err);
+  }
+};
+
+// Simple in-memory store for notifications
+const userNotifications = new Map();
+
+// API endpoint to get notifications for a user
+app.get('/api/notifications/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const notification = userNotifications.get(userId);
+    
+    if (notification && !notification.read) {
+      // Mark as read when fetched
+      notification.read = true;
+      res.json(notification);
+    } else {
+      res.json(null);
+    }
+  } catch (err) {
+    console.error('❌ Error fetching notifications:', err);
+    res.status(500).json({ error: 'Failed to fetch notifications', details: err.message });
+  }
+});
+
+// Schedule notification checks every minute
+setInterval(checkAndSendNotifications, 60 * 1000);
+setTimeout(checkAndSendNotifications, 5000);

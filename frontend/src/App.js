@@ -6,6 +6,7 @@ import BadgeDisplay from './components/BadgeDisplay';
 import ProgressCharts from './components/ProgressCharts';
 import ActivityLog from './components/ActivityLog';
 import Recommendations from './components/Recommendations';
+import Settings from './components/Settings';
 
 function PinnedFrequentActivities({ pinnedCustomActivities, frequentActivities, logPredefined }) {
   const combinedActivities = [
@@ -54,7 +55,7 @@ function PinnedFrequentActivities({ pinnedCustomActivities, frequentActivities, 
                   gap: '10px'
                 }}
               >
-                <span style={{ fontSize: '20px' }}>{activity.emoji || '✨'}</span>
+                <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
                 <div>
                   <strong>{activity.activityName}</strong>
                   <div style={{ color: activity.points >= 0 ? '#27ae60' : '#c0392b', fontWeight: 'bold' }}>
@@ -108,18 +109,20 @@ function App() {
   const [completedGoal, setCompletedGoal] = useState(null);
   const [showGoalCompleteNotification, setShowGoalCompleteNotification] = useState(false);
   const [recommendations, setRecommendations] = useState({
-  generalAdvice: '',
-  activitySuggestions: []
+    generalAdvice: '',
+    activitySuggestions: []
   });
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [lastRecommendationUpdate, setLastRecommendationUpdate] = useState(null);
   const [cacheStatus, setCacheStatus] = useState({});
+  const [notification, setNotification] = useState(null);
+  const [showNotification, setShowNotification] = useState(false);
 
-// Categories
-const categories = [
-  'General',
-  'Transportation',
-  'Energy',
+  // Categories
+  const categories = [
+    'General',
+    'Transportation',
+    'Energy',
     'Waste',
     'Food',
     'Water',
@@ -173,6 +176,25 @@ const categories = [
     fetchRecommendations();
   }, []);
 
+  useEffect(() => {
+    // Request notification permission on app load
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('Notification permission:', permission);
+      });
+    }
+  }, []);
+
+  // Add useEffect to check for notifications
+  useEffect(() => {
+    checkForNotifications();
+    
+    // Check for notifications every 30 seconds
+    const notificationInterval = setInterval(checkForNotifications, 30000);
+    
+    return () => clearInterval(notificationInterval);
+  }, []);
+
   // Fetch pinned activities from backend
   const fetchPinnedActivities = async () => {
     try {
@@ -222,6 +244,34 @@ const categories = [
   const calculateScore = (data) => {
     const sum = data.reduce((acc, curr) => acc + curr.points, 0);
     setTotalScore(sum);
+  };
+
+  // Add browser notification function
+  const showBrowserNotification = (message) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('EcoTrack Reminder', {
+        body: message,
+        icon: '/favicon.ico' // Add a favicon to your public folder
+      });
+    }
+  };
+
+  // Check for notifications
+  const checkForNotifications = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/notifications/default_user');
+      if (response.data && response.data.message) {
+        setNotification(response.data);
+        setShowNotification(true);
+        showBrowserNotification(response.data.message);
+        
+        setTimeout(() => {
+          setShowNotification(false);
+        }, 5000);
+      }
+    } catch (err) {
+      console.error('Error checking notifications:', err);
+    }
   };
 
   // Log predefined activity
@@ -306,7 +356,6 @@ const categories = [
       console.error('Error pinning activity:', err);
       alert('Error pinning activity: ' + (err.response?.data?.error || err.message));
     }
-    
   };
 
   // Unpin custom activity
@@ -447,7 +496,7 @@ const categories = [
 
   // Fetch Recommendations
   const fetchRecommendations = async () => {
-  setLoadingRecommendations(true);
+    setLoadingRecommendations(true);
     try {
       const response = await axios.get('http://localhost:5000/api/recommendations/default_user');
       setRecommendations(response.data);
@@ -457,7 +506,6 @@ const categories = [
       setCacheStatus(statusResponse.data);
     } catch (err) {
       console.error('Error fetching recommendations:', err);
-      // You might want to set some fallback recommendations here
       setRecommendations({
         generalAdvice: "We're having trouble generating recommendations right now. Keep tracking your eco-activities!",
         activitySuggestions: []
@@ -468,16 +516,16 @@ const categories = [
   };
 
   // Manual Refresh Function
-  const  refreshRecommendations = async () => {
+  const refreshRecommendations = async () => {
     setLoadingRecommendations(true);
     try {
       const response = await axios.post('http://localhost:5000/api/recommendations/default_user/refresh');
-        setRecommendations(response.data.recommendations);
-        setLastRecommendationUpdate(new Date());
+      setRecommendations(response.data.recommendations);
+      setLastRecommendationUpdate(new Date());
 
-        const statusResponse = await axios.get('http://localhost:5000/api/recommendations/default_user/cache-status');
-        setCacheStatus(statusResponse.data);
-        alert('Recommendations refreshed succesfully');
+      const statusResponse = await axios.get('http://localhost:5000/api/recommendations/default_user/cache-status');
+      setCacheStatus(statusResponse.data);
+      alert('Recommendations refreshed successfully');
     } catch (err) {
       console.error("Error refreshing recommendations:", err);
       alert("Error refreshing recommendations: " + (err.response?.data?.error || err.message));
@@ -485,13 +533,11 @@ const categories = [
       setLoadingRecommendations(false);
     }
   };
-  
 
   // Pin Suggested Activities
   const pinSuggestedActivity = async (activity) => {
     try {
       await pinCustomActivity(activity);
-      // Remove the pinned activity from suggestions
       setRecommendations(prev => ({
         ...prev,
         activitySuggestions: prev.activitySuggestions.filter(a => 
@@ -593,6 +639,27 @@ const categories = [
               }}
             >
               📋 Activity Log
+            </button>
+            <button
+              onClick={() => {
+                setCurrentPage('settings');
+                setShowHamburgerMenu(false);
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px',
+                border: 'none',
+                background: currentPage === 'settings' ? '#3498db' : 'transparent',
+                color: currentPage === 'settings' ? 'white' : '#2c3e50',
+                textAlign: 'left',
+                fontSize: '16px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                marginBottom: '5px'
+              }}
+            >
+              ⚙️ Settings
             </button>
           </div>
         )}
@@ -702,7 +769,24 @@ const categories = [
         </div>
       )}
 
-      {currentPage === 'main' ? (
+      {currentPage === 'settings' ? (
+        <Settings onBack={() => setCurrentPage('main')} />
+      ) : currentPage === 'history' ? (
+        <GoalHistory onBack={() => setCurrentPage('main')} />
+      ) : currentPage === 'activityLog' ? (
+        <ActivityLog 
+          activities={activities}
+          handleDelete={handleDelete}
+          pinnedCustomActivities={pinnedCustomActivities}
+          pinCustomActivity={pinCustomActivity}
+          unpinCustomActivity={unpinCustomActivity}
+          positiveActivities={positiveActivities}
+          negativeActivities={negativeActivities}
+          categories={categories}
+          selectedCategoryFilter={selectedCategoryFilter}
+          setSelectedCategoryFilter={setSelectedCategoryFilter}
+        />
+      ) : (
         <div>
           {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: '40px' }}>
@@ -722,207 +806,207 @@ const categories = [
           />
 
           {/* Activities Section */}
-<div style={{ marginBottom: '40px' }}>
-  <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🌟 Activities</h2>
-  
-  {/* Positive Actions */}
-  <div style={{ marginBottom: '20px' }}>
-    <h3 style={{ color: '#27ae60', marginBottom: '15px' }}>Positive Actions</h3>
-    <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-      {positiveActivities.map((activity, index) => {
-        const isPinned = pinnedCustomActivities.some(
-          (pin) => pin.activityName === activity.activity
-        );
-        
-        return (
-          <button
-            key={index}
-            onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
-            style={{
-              padding: '15px',
-              backgroundColor: '#e8f5e8',
-              border: '2px solid #27ae60',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontSize: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}
-          >
-            <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
-            <div>
-              <strong>{activity.activity}</strong>
-              <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
-                +{activity.points} points
+          <div style={{ marginBottom: '40px' }}>
+            <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>🌟 Activities</h2>
+            
+            {/* Positive Actions */}
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ color: '#27ae60', marginBottom: '15px' }}>Positive Actions</h3>
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                {positiveActivities.map((activity, index) => {
+                  const isPinned = pinnedCustomActivities.some(
+                    (pin) => pin.activityName === activity.activity
+                  );
+                  
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+                      style={{
+                        padding: '15px',
+                        backgroundColor: '#e8f5e8',
+                        border: '2px solid #27ae60',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}
+                    >
+                      <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+                      <div>
+                        <strong>{activity.activity}</strong>
+                        <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                          +{activity.points} points
+                        </div>
+                        <small style={{ color: '#666' }}>{activity.category}</small>
+                        {isPinned && (
+                          <span style={{
+                            backgroundColor: '#f1c40f',
+                            color: '#2c3e50',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            marginLeft: '5px'
+                          }}>
+                            📌 Pinned
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+                
+                {/* Pinned positive custom activities */}
+                {pinnedCustomActivities
+                  .filter(pin => pin.points > 0 && !positiveActivities.some(pa => pa.activity === pin.activityName))
+                  .map((activity, index) => {
+                    const isPinned = true;
+                    
+                    return (
+                      <button
+                        key={`pinned-${index}`}
+                        onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
+                        style={{
+                          padding: '15px',
+                          backgroundColor: '#e8f5e8',
+                          border: '2px solid #27ae60',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontSize: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px'
+                        }}
+                      >
+                        <span style={{ fontSize: '20px' }}>{activity.emoji || '✨'}</span>
+                        <div>
+                          <strong>{activity.activityName}</strong>
+                          <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
+                            +{activity.points} points
+                          </div>
+                          <small style={{ color: '#666' }}>{activity.category}</small>
+                          {isPinned && (
+                            <span style={{
+                              backgroundColor: '#f1c40f',
+                              color: '#2c3e50',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              fontSize: '10px',
+                              marginLeft: '5px'
+                            }}>
+                              📌 Pinned
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
               </div>
-              <small style={{ color: '#666' }}>{activity.category}</small>
-              {isPinned && (
-                <span style={{
-                  backgroundColor: '#f1c40f',
-                  color: '#2c3e50',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  fontSize: '10px',
-                  marginLeft: '5px'
-                }}>
-                  📌 Pinned
-                </span>
-              )}
             </div>
-          </button>
-        );
-      })}
-      
-      {/* Pinned positive custom activities */}
-      {pinnedCustomActivities
-        .filter(pin => pin.points > 0 && !positiveActivities.some(pa => pa.activity === pin.activityName))
-        .map((activity, index) => {
-          const isPinned = true;
-          
-          return (
-            <button
-              key={`pinned-${index}`}
-              onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
-              style={{
-                padding: '15px',
-                backgroundColor: '#e8f5e8',
-                border: '2px solid #27ae60',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}
-            >
-              <span style={{ fontSize: '20px' }}>{activity.emoji || '✨'}</span>
-              <div>
-                <strong>{activity.activityName}</strong>
-                <div style={{ color: '#27ae60', fontWeight: 'bold' }}>
-                  +{activity.points} points
-                </div>
-                <small style={{ color: '#666' }}>{activity.category}</small>
-                {isPinned && (
-                  <span style={{
-                    backgroundColor: '#f1c40f',
-                    color: '#2c3e50',
-                    padding: '2px 8px',
-                    borderRadius: '12px',
-                    fontSize: '10px',
-                    marginLeft: '5px'
-                  }}>
-                    📌 Pinned
-                  </span>
-                )}
-              </div>
-            </button>
-          );
-        })}
-    </div>
-  </div>
-  
-  {/* Negative Actions */}
-  <div>
-    <h3 style={{ color: '#c0392b', marginBottom: '15px' }}>Negative Actions</h3>
-    <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-      {negativeActivities.map((activity, index) => {
-        const isPinned = pinnedCustomActivities.some(
-          (pin) => pin.activityName === activity.activity
-        );
-        
-        return (
-          <button
-            key={index}
-            onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
-            style={{
-              padding: '15px',
-              backgroundColor: '#f8d7da',
-              border: '2px solid #c0392b',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontSize: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}
-          >
-            <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+            
+            {/* Negative Actions */}
             <div>
-              <strong>{activity.activity}</strong>
-              <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
-                {activity.points} points
+              <h3 style={{ color: '#c0392b', marginBottom: '15px' }}>Negative Actions</h3>
+              <div style={{ display: 'grid', gap: '15px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                {negativeActivities.map((activity, index) => {
+                  const isPinned = pinnedCustomActivities.some(
+                    (pin) => pin.activityName === activity.activity
+                  );
+                  
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => logPredefined(activity.activity, activity.points, activity.category)}
+                      style={{
+                        padding: '15px',
+                        backgroundColor: '#f8d7da',
+                        border: '2px solid #c0392b',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}
+                    >
+                      <span style={{ fontSize: '20px' }}>{activity.emoji}</span>
+                      <div>
+                        <strong>{activity.activity}</strong>
+                        <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
+                          {activity.points} points
+                        </div>
+                        <small style={{ color: '#666' }}>{activity.category}</small>
+                        {isPinned && (
+                          <span style={{
+                            backgroundColor: '#f1c40f',
+                            color: '#2c3e50',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            marginLeft: '5px'
+                          }}>
+                            📌 Pinned
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+                
+                {/* Pinned negative custom activities */}
+                {pinnedCustomActivities
+                  .filter(pin => pin.points < 0 && !negativeActivities.some(na => na.activity === pin.activityName))
+                  .map((activity, index) => {
+                    const isPinned = true;
+                    
+                    return (
+                      <button
+                        key={`pinned-neg-${index}`}
+                        onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
+                        style={{
+                          padding: '15px',
+                          backgroundColor: '#f8d7da',
+                          border: '2px solid #c0392b',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontSize: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px'
+                        }}
+                      >
+                        <span style={{ fontSize: '20px' }}>{activity.emoji || '⚠️'}</span>
+                        <div>
+                          <strong>{activity.activityName}</strong>
+                          <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
+                            {activity.points} points
+                          </div>
+                          <small style={{ color: '#666' }}>{activity.category}</small>
+                          {isPinned && (
+                            <span style={{
+                              backgroundColor: '#f1c40f',
+                              color: '#2c3e50',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              fontSize: '10px',
+                              marginLeft: '5px'
+                            }}>
+                              📌 Pinned
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
               </div>
-              <small style={{ color: '#666' }}>{activity.category}</small>
-              {isPinned && (
-                <span style={{
-                  backgroundColor: '#f1c40f',
-                  color: '#2c3e50',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  fontSize: '10px',
-                  marginLeft: '5px'
-                }}>
-                  📌 Pinned
-                </span>
-              )}
             </div>
-          </button>
-        );
-      })}
-      
-      {/* Pinned negative custom activities */}
-      {pinnedCustomActivities
-        .filter(pin => pin.points < 0 && !negativeActivities.some(na => na.activity === pin.activityName))
-        .map((activity, index) => {
-          const isPinned = true;
-          
-          return (
-            <button
-              key={`pinned-neg-${index}`}
-              onClick={() => logPredefined(activity.activityName, activity.points, activity.category)}
-              style={{
-                padding: '15px',
-                backgroundColor: '#f8d7da',
-                border: '2px solid #c0392b',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}
-            >
-              <span style={{ fontSize: '20px' }}>{activity.emoji || '⚠️'}</span>
-              <div>
-                <strong>{activity.activityName}</strong>
-                <div style={{ color: '#c0392b', fontWeight: 'bold' }}>
-                  {activity.points} points
-                </div>
-                <small style={{ color: '#666' }}>{activity.category}</small>
-                {isPinned && (
-                  <span style={{
-                    backgroundColor: '#f1c40f',
-                    color: '#2c3e50',
-                    padding: '2px 8px',
-                    borderRadius: '12px',
-                    fontSize: '10px',
-                    marginLeft: '5px'
-                  }}>
-                    📌 Pinned
-                  </span>
-                )}
-              </div>
-            </button>
-          );
-        })}
-    </div>
-  </div>
-</div>
+          </div>
 
           {/* Custom Activity Form */}
           <div style={{ marginBottom: '40px' }}>
@@ -1115,39 +1199,63 @@ const categories = [
 
           {/* Gemini Recommendations */}
           <Recommendations
-           recommendations={recommendations}
-           loadingRecommendations={loadingRecommendations}
-           onPinSuggestion={pinSuggestedActivity}
-           lastUpdate = {lastRecommendationUpdate}
-           cacheStatus = {cacheStatus}
-           onRefresh = {refreshRecommendations}
+            recommendations={recommendations}
+            loadingRecommendations={loadingRecommendations}
+            onPinSuggestion={pinSuggestedActivity}
+            lastUpdate={lastRecommendationUpdate}
+            cacheStatus={cacheStatus}
+            onRefresh={refreshRecommendations}
           />
-          
-
 
           {/* Badge Display */}
           <BadgeDisplay userId="default_user" showStats={true} />
 
           {/* Visualization */}
           <ProgressCharts userId="default_user" />
+
+          {/* Notification Display */}
+          {showNotification && notification && (
+            <div style={{
+              position: 'fixed',
+              top: '20px',
+              right: '20px',
+              backgroundColor: '#27ae60',
+              color: 'white',
+              padding: '15px 20px',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              zIndex: 10000,
+              maxWidth: '300px',
+              animation: 'slideInRight 0.3s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>🔔</span>
+                <div>
+                  <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.4' }}>
+                    {notification.message}
+                  </p>
+                  <small style={{ opacity: 0.8, fontSize: '12px' }}>
+                    {new Date(notification.timestamp).toLocaleTimeString()}
+                  </small>
+                </div>
+                <button
+                  onClick={() => setShowNotification(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'white',
+                    fontSize: '18px',
+                    cursor: 'pointer',
+                    padding: '0',
+                    marginLeft: '10px'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      ) : currentPage === 'history' ? (
-        <GoalHistory onBack={() => {
-          setCurrentPage('main');
-        }} />
-      ) : (
-        <ActivityLog 
-          activities={activities}
-          handleDelete={handleDelete}
-          pinnedCustomActivities={pinnedCustomActivities}
-          pinCustomActivity={pinCustomActivity}
-          unpinCustomActivity={unpinCustomActivity}
-          positiveActivities={positiveActivities}
-          negativeActivities={negativeActivities}
-          categories={categories}
-          selectedCategoryFilter={selectedCategoryFilter}
-          setSelectedCategoryFilter={setSelectedCategoryFilter}
-        />
       )}
 
       {/* Badge Notification */}
