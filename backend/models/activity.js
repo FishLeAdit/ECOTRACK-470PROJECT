@@ -6,8 +6,8 @@ const activitySchema = new mongoose.Schema({
   type: { type: String, enum: ["Positive", "Negative"], required: true },
   points: { type: Number, required: true },
   date: { type: Date, default: Date.now },
-  category: { type: String, default: "General" }
-
+  category: { type: String, default: "General" },
+  carbonEmission: { type: Number, default: 0 }
 });
 
 module.exports = mongoose.model("Activity", activitySchema);

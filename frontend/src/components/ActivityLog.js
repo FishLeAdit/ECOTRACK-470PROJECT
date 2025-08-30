@@ -1,4 +1,5 @@
 import React from 'react';
+import axios from 'axios';
 
 function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCustomActivity, unpinCustomActivity, positiveActivities, negativeActivities, categories, selectedCategoryFilter, setSelectedCategoryFilter }) {
   console.log('📋 ActivityLog props:', {
@@ -78,6 +79,11 @@ function ActivityLog({ activities, handleDelete, pinnedCustomActivities, pinCust
                     <div style={{ marginBottom: '5px' }}>
                       <span style={{ color: a.points >= 0 ? '#27ae60' : '#c0392b', fontSize: '18px', fontWeight: 'bold' }}>
                         {a.points >= 0 ? `+${a.points}` : `${a.points}`} points
+                      </span>
+                    </div>
+                    <div style={{ marginBottom: '5px' }}>
+                      <span style={{ color: a.carbonEmission >= 0 ? '#c0392b' : '#27ae60', fontSize: '14px' }}>
+                        {a.carbonEmission >= 0 ? `+${a.carbonEmission.toFixed(2)}` : `${a.carbonEmission.toFixed(2)}`} kg CO₂e
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>

@@ -16,6 +16,70 @@ const Settings = require('./models/settings');
 // --- SERVICES ---
 const BadgeService = require('./services/badgeService');
 
+// --- CARBON EMISSION FACTORS ---
+// Carbon emission factors (kg CO2e per activity)
+const CARBON_EMISSION_FACTORS = {
+  // Transportation
+  "Walked instead of driving": -0.2, // Negative because it saves emissions
+  "Used Bicycle": -0.15,
+  "Used Public Transport": -0.1,
+  "Drove Car Alone": 0.24, // kg CO2e per km (average car)
+  "Took Short Flight (<500km)": 0.12, // kg CO2e per km
+  
+  // Energy
+  "Reduced Electricity Usage": -0.05, // per kWh saved
+  "Left Lights/AC On": 0.1, // per hour
+  
+  // Waste
+  "Recycled Waste": -0.1,
+  "Composted Kitchen Waste": -0.05,
+  "Used Plastic Bags": 0.02,
+  
+  // Food
+  "Bought Local Produce": -0.1,
+  "Wasted Food": 0.5, // per kg of food wasted
+  
+  // Water
+  "Used Reusable Bottle": -0.02,
+  "Used Disposable Bottles": 0.01,
+  
+  // Default values for categories
+  "default": {
+    "Transportation": 0.1,
+    "Energy": 0.05,
+    "Waste": 0.03,
+    "Food": 0.08,
+    "Water": 0.01,
+    "Shopping": 0.02,
+    "Home": 0.04,
+    "Work": 0.03,
+    "Recreation": 0.02,
+    "General": 0.05
+  }
+};
+
+// Helper function to estimate carbon emissions for an activity
+function estimateCarbonEmission(activity) {
+  const activityName = activity.activityName;
+  
+  // Check for exact matches first
+  if (CARBON_EMISSION_FACTORS[activityName] !== undefined) {
+    return CARBON_EMISSION_FACTORS[activityName];
+  }
+  
+  // Use category-based defaults
+  const category = activity.category || 'General';
+  if (CARBON_EMISSION_FACTORS.default[category] !== undefined) {
+    // For positive activities, use negative emissions (savings)
+    return activity.points > 0 
+      ? -CARBON_EMISSION_FACTORS.default[category] 
+      : CARBON_EMISSION_FACTORS.default[category];
+  }
+  
+  // Final fallback
+  return activity.points > 0 ? -0.05 : 0.05;
+}
+
 // --- APP INITIALIZATION & MIDDLEWARE ---
 const app = express();
 app.use(cors());
@@ -151,6 +215,13 @@ app.post('/api/activities', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const carbonEmission = estimateCarbonEmission({
+      activityName,
+      points,
+      category: category || 'General',
+      type
+    });
+
     const newActivity = new Activity({
       userId,
       activityName,
@@ -158,6 +229,7 @@ app.post('/api/activities', async (req, res) => {
       category: category || 'General',
       type,
       emoji: emoji || '',
+      carbonEmission, 
       date: new Date()
     });
     
@@ -678,6 +750,65 @@ app.get('/api/notifications/:userId', async (req, res) => {
   } catch (err) {
     console.error('❌ Error fetching notifications:', err);
     res.status(500).json({ error: 'Failed to fetch notifications', details: err.message });
+  }
+});
+
+// GET: Total carbon emissions for a user
+app.get('/api/carbon/total/:userId', async (req, res) => {
+  try {
+    const activities = await Activity.find({ userId: req.params.userId });
+    const totalCarbon = activities.reduce((sum, activity) => sum + activity.carbonEmission, 0);
+    res.json({ totalCarbon: parseFloat(totalCarbon.toFixed(2)) });
+  } catch (err) {
+    console.error('❌ Error fetching total carbon:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET: Daily carbon emissions for a user
+app.get('/api/carbon/daily/:userId', async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const activities = await Activity.find({ 
+      userId: req.params.userId,
+      date: { $gte: today }
+    });
+    
+    const dailyCarbon = activities.reduce((sum, activity) => sum + activity.carbonEmission, 0);
+    res.json({ dailyCarbon: parseFloat(dailyCarbon.toFixed(2)) });
+  } catch (err) {
+    console.error('❌ Error fetching daily carbon:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET: Carbon emission history for charts
+app.get('/api/carbon/history/:userId', async (req, res) => {
+  try {
+    const activities = await Activity.find({ userId: req.params.userId }).sort({ date: 1 });
+    
+    // Group by day
+    const dailyData = {};
+    activities.forEach(activity => {
+      const dateStr = activity.date.toISOString().split('T')[0];
+      if (!dailyData[dateStr]) {
+        dailyData[dateStr] = 0;
+      }
+      dailyData[dateStr] += activity.carbonEmission;
+    });
+    
+    // Format for chart
+    const chartData = Object.entries(dailyData).map(([date, carbon]) => ({
+      date,
+      carbon: parseFloat(carbon.toFixed(2))
+    }));
+    
+    res.json(chartData);
+  } catch (err) {
+    console.error('❌ Error fetching carbon history:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

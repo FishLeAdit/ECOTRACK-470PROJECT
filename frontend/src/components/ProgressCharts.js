@@ -1,290 +1,234 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Title,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
   Legend,
-  ArcElement
-} from 'chart.js';
-import { Bar, Line, Pie } from 'react-chartjs-2';
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area
+} from 'recharts';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement
-);
-
-function ProgressCharts({ userId = 'default_user' }) {
-  const [activities, setActivities] = useState([]);
+function ProgressCharts({ userId }) {
+  const [categoryData, setCategoryData] = useState([]);
+  const [dailyData, setDailyData] = useState([]);
+  const [carbonHistory, setCarbonHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('week'); // 'day', 'week', 'month'
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FF6B6B', '#48DBFB', '#F368E0', '#1DD1A1'];
 
   useEffect(() => {
-    fetchActivities();
-  }, [userId, timeRange]);
+    const fetchChartData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch all data in parallel
+        const [activitiesRes, carbonRes] = await Promise.all([
+          axios.get(`http://localhost:5000/api/activities/${userId}`),
+          axios.get(`http://localhost:5000/api/carbon/history/${userId}`)
+        ]);
+        
+        const activities = activitiesRes.data;
+        
+        // Process category data
+        const categoryMap = {};
+        activities.forEach(activity => {
+          const category = activity.category || 'General';
+          if (!categoryMap[category]) {
+            categoryMap[category] = {
+              category,
+              points: 0,
+              count: 0,
+              carbon: 0
+            };
+          }
+          categoryMap[category].points += activity.points;
+          categoryMap[category].count += 1;
+          categoryMap[category].carbon += activity.carbonEmission || 0;
+        });
+        
+        setCategoryData(Object.values(categoryMap));
+        
+        // Process daily data
+        const dailyMap = {};
+        activities.forEach(activity => {
+          const date = new Date(activity.date).toISOString().split('T')[0];
+          if (!dailyMap[date]) {
+            dailyMap[date] = {
+              date,
+              points: 0,
+              count: 0,
+              carbon: 0
+            };
+          }
+          dailyMap[date].points += activity.points;
+          dailyMap[date].count += 1;
+          dailyMap[date].carbon += activity.carbonEmission || 0;
+        });
+        
+        // Convert to array and sort by date
+        const dailyArray = Object.values(dailyMap).sort((a, b) => 
+          new Date(a.date) - new Date(b.date)
+        );
+        
+        setDailyData(dailyArray);
+        
+        // Set carbon history
+        setCarbonHistory(carbonRes.data);
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching chart data:', err);
+        setLoading(false);
+      }
+    };
 
-  const fetchActivities = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`http://localhost:5000/api/activities/${userId}`);
-      setActivities(response.data);
-    } catch (err) {
-      console.error('Error fetching activities:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    fetchChartData();
+  }, [userId]);
 
   if (loading) {
-    return <div>Loading charts...</div>;
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '40px',
+        color: '#666'
+      }}>
+        <p>Loading charts...</p>
+      </div>
+    );
   }
 
-  // Process data for charts
-  const processTimeData = () => {
-    const now = new Date();
-    let labels = [];
-    let dataPoints = [];
-
-    if (timeRange === 'day') {
-      // Last 7 days
-      labels = Array.from({ length: 7 }, (_, i) => {
-        const date = new Date(now);
-        date.setDate(date.getDate() - (6 - i));
-        return date.toLocaleDateString('en-US', { weekday: 'short' });
-      });
-
-      dataPoints = Array(7).fill(0);
-      activities.forEach(activity => {
-        const activityDate = new Date(activity.date);
-        const diffDays = Math.floor((now - activityDate) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays < 7) {
-          dataPoints[6 - diffDays] += activity.points;
-        }
-      });
-    } else if (timeRange === 'week') {
-      // Last 4 weeks
-      labels = Array.from({ length: 4 }, (_, i) => `Week ${4 - i}`);
-      
-      dataPoints = Array(4).fill(0);
-      activities.forEach(activity => {
-        const activityDate = new Date(activity.date);
-        const diffWeeks = Math.floor((now - activityDate) / (1000 * 60 * 60 * 24 * 7));
-        if (diffWeeks >= 0 && diffWeeks < 4) {
-          dataPoints[3 - diffWeeks] += activity.points;
-        }
-      });
-    } else {
-      // Last 6 months
-      labels = Array.from({ length: 6 }, (_, i) => {
-        const date = new Date(now);
-        date.setMonth(date.getMonth() - (5 - i));
-        return date.toLocaleDateString('en-US', { month: 'short' });
-      });
-      
-      dataPoints = Array(6).fill(0);
-      activities.forEach(activity => {
-        const activityDate = new Date(activity.date);
-        const diffMonths = (now.getFullYear() - activityDate.getFullYear()) * 12 + 
-                          now.getMonth() - activityDate.getMonth();
-        if (diffMonths >= 0 && diffMonths < 6) {
-          dataPoints[5 - diffMonths] += activity.points;
-        }
-      });
-    }
-
-    return { labels, dataPoints };
-  };
-
-  const processCategoryData = () => {
-    const categories = [
-      'Transportation', 'Energy', 'Waste', 'Food', 
-      'Water', 'Shopping', 'Home', 'Work', 'Recreation', 'General'
-    ];
-    
-    const dataPoints = Array(categories.length).fill(0);
-    
-    activities.forEach(activity => {
-      const categoryIndex = categories.indexOf(activity.category || 'General');
-      if (categoryIndex !== -1) {
-        dataPoints[categoryIndex] += activity.points;
-      }
-    });
-    
-    return { labels: categories, dataPoints };
-  };
-
-  const { labels: timeLabels, dataPoints: timeData } = processTimeData();
-  const { labels: categoryLabels, dataPoints: categoryData } = processCategoryData();
-
   return (
-    <div style={{ 
-      marginTop: '40px',
-      backgroundColor: '#f8f9fa',
-      borderRadius: '15px',
-      padding: '25px',
-      boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
-    }}>
-      <h2 style={{ color: '#2c3e50', marginBottom: '25px' }}>📊 Progress Visualization</h2>
+    <div style={{ marginTop: '40px' }}>
+      <h2 style={{ color: '#2c3e50', marginBottom: '20px' }}>📊 Progress & Carbon Analytics</h2>
       
-      {/* Time Range Selector */}
-      <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
-        <button
-          onClick={() => setTimeRange('day')}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: timeRange === 'day' ? '#3498db' : '#ecf0f1',
-            color: timeRange === 'day' ? 'white' : '#2c3e50',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer'
-          }}
-        >
-          Daily
-        </button>
-        <button
-          onClick={() => setTimeRange('week')}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: timeRange === 'week' ? '#3498db' : '#ecf0f1',
-            color: timeRange === 'week' ? 'white' : '#2c3e50',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer'
-          }}
-        >
-          Weekly
-        </button>
-        <button
-          onClick={() => setTimeRange('month')}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: timeRange === 'month' ? '#3498db' : '#ecf0f1',
-            color: timeRange === 'month' ? 'white' : '#2c3e50',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer'
-          }}
-        >
-          Monthly
-        </button>
-      </div>
-      
-      {/* Points Over Time Chart */}
-      <div style={{ marginBottom: '40px' }}>
-        <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>
-          {timeRange === 'day' ? 'Daily' : timeRange === 'week' ? 'Weekly' : 'Monthly'} Points
-        </h3>
-        <div style={{ height: '300px' }}>
-          <Line
-            data={{
-              labels: timeLabels,
-              datasets: [
-                {
-                  label: 'Eco Points',
-                  data: timeData,
-                  borderColor: '#27ae60',
-                  backgroundColor: 'rgba(39, 174, 96, 0.2)',
-                  tension: 0.3,
-                  fill: true
-                }
-              ]
-            }}
-            options={{
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                legend: {
-                  position: 'top',
-                },
-                tooltip: {
-                  callbacks: {
-                    label: (context) => `${context.dataset.label}: ${context.raw} points`
-                  }
-                }
-              },
-              scales: {
-                y: {
-                  beginAtZero: true,
-                  title: {
-                    display: true,
-                    text: 'Points'
-                  }
-                },
-                x: {
-                  title: {
-                    display: true,
-                    text: timeRange === 'day' ? 'Day' : timeRange === 'week' ? 'Week' : 'Month'
-                  }
-                }
-              }
-            }}
-          />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' }}>
+        
+        {/* Points by Category */}
+        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Points by Category</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={categoryData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="category" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="points" fill="#3498db" name="Points" />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
+        
+        {/* Activities by Category */}
+        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Activities by Category</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={categoryData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ category, count }) => `${category}: ${count}`}
+                outerRadius={80}
+                fill="#8884d8"
+                dataKey="count"
+                nameKey="category"
+              >
+                {categoryData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        
+        {/* Daily Points Trend */}
+        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Daily Points Trend</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={dailyData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="points" fill="#27ae60" name="Points" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
+        {/* Carbon Emission History */}
+        {carbonHistory.length > 0 && (
+          <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Carbon Emission History</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={carbonHistory}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis label={{ value: 'kg CO₂e', angle: -90, position: 'insideLeft' }} />
+                <Tooltip />
+                <Area type="monotone" dataKey="carbon" stroke="#e74c3c" fill="#fadbd8" name="Carbon Emissions" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        
+        {/* Carbon by Category */}
+        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Carbon Impact by Category</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={categoryData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="category" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="carbon" fill="#e74c3c" name="Carbon (kg CO₂e)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
+        {/* Daily Carbon Trend */}
+        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 8px rgba(0,0,0,0.1)' }}>
+          <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Daily Carbon Trend</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={dailyData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis label={{ value: 'kg CO₂e', angle: -90, position: 'insideLeft' }} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="carbon" fill="#e74c3c" name="Carbon (kg CO₂e)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        
       </div>
       
-      {/* Category Distribution Chart */}
-      <div>
-        <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>Points by Category</h3>
-        <div style={{ height: '300px' }}>
-          <Bar
-            data={{
-              labels: categoryLabels,
-              datasets: [
-                {
-                  label: 'Points',
-                  data: categoryData,
-                  backgroundColor: [
-                    '#3498db', '#e74c3c', '#2ecc71', '#f39c12', 
-                    '#9b59b6', '#1abc9c', '#d35400', '#34495e', 
-                    '#16a085', '#7f8c8d'
-                  ],
-                  borderColor: [
-                    '#2980b9', '#c0392b', '#27ae60', '#e67e22',
-                    '#8e44ad', '#16a085', '#e67e22', '#2c3e50',
-                    '#1abc9c', '#95a5a6'
-                  ],
-                  borderWidth: 1
-                }
-              ]
-            }}
-            options={{
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: {
-                legend: {
-                  display: false
-                },
-                tooltip: {
-                  callbacks: {
-                    label: (context) => `${context.label}: ${context.raw} points`
-                  }
-                }
-              },
-              scales: {
-                y: {
-                  beginAtZero: true,
-                  title: {
-                    display: true,
-                    text: 'Points'
-                  }
-                }
-              }
-            }}
-          />
+      {categoryData.length === 0 && (
+        <div style={{
+          textAlign: 'center',
+          padding: '40px',
+          color: '#666',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '12px',
+          border: '2px dashed #ddd'
+        }}>
+          <div style={{ fontSize: '48px', marginBottom: '15px' }}>📊</div>
+          <p style={{ fontSize: '18px', marginBottom: '10px' }}>No data available for charts!</p>
+          <p style={{ fontSize: '14px' }}>Start logging activities to see your progress visualized.</p>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -117,6 +117,10 @@ function App() {
   const [cacheStatus, setCacheStatus] = useState({});
   const [notification, setNotification] = useState(null);
   const [showNotification, setShowNotification] = useState(false);
+  const [carbonData, setCarbonData] = useState({
+  total: 0,
+  daily: 0
+});
 
   // Categories
   const categories = [
@@ -174,6 +178,7 @@ function App() {
     fetchGoals();
     fetchPinnedActivities();
     fetchRecommendations();
+    fetchCarbonData();
   }, []);
 
   useEffect(() => {
@@ -294,6 +299,7 @@ function App() {
       await fetchFrequentActivities();
       await fetchGoals();
       await fetchPinnedActivities();
+      await fetchCarbonData();
     } catch (err) {
       console.error('Error adding predefined activity:', err);
       alert("Error adding activity: " + (err.response?.data?.error || err.message));
@@ -323,6 +329,7 @@ function App() {
       await fetchFrequentActivities();
       await fetchGoals();
       await fetchPinnedActivities();
+      await fetchCarbonData();
       setCustomActivity('');
       setCustomPoints('');
       setCustomEmoji('');
@@ -477,6 +484,7 @@ function App() {
       await fetchFrequentActivities();
       await fetchGoals();
       await fetchPinnedActivities();
+      await fetchCarbonData();
     } catch (err) {
       console.error('Error deleting activity:', err);
       alert("Error deleting activity: " + (err.response?.data?.error || err.message));
@@ -533,6 +541,23 @@ function App() {
       setLoadingRecommendations(false);
     }
   };
+
+  // Fetch carbon data
+const fetchCarbonData = async () => {
+  try {
+    const [totalRes, dailyRes] = await Promise.all([
+      axios.get(`http://localhost:5000/api/carbon/total/default_user`),
+      axios.get(`http://localhost:5000/api/carbon/daily/default_user`)
+    ]);
+    
+    setCarbonData({
+      total: totalRes.data.totalCarbon,
+      daily: dailyRes.data.dailyCarbon
+    });
+  } catch (err) {
+    console.error('Error fetching carbon data:', err);
+  }
+};
 
   // Pin Suggested Activities
   const pinSuggestedActivity = async (activity) => {
@@ -788,15 +813,53 @@ function App() {
         />
       ) : (
         <div>
-          {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-            <h1 style={{ color: '#2c3e50', fontSize: '28px', marginBottom: '10px' }}>
-              🌍 EcoTrack Dashboard
-            </h1>
-            <p style={{ color: '#7f8c8d', fontSize: '16px' }}>
-              Your Total Eco Points: <strong style={{ color: totalScore >= 0 ? '#27ae60' : '#e74c3c' }}>{totalScore}</strong>
-            </p>
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+          <h1 style={{ color: '#2c3e50', fontSize: '28px', marginBottom: '10px' }}>
+            🌍 EcoTrack Dashboard
+          </h1>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '40px', flexWrap: 'wrap' }}>
+            <div>
+              <p style={{ color: '#7f8c8d', fontSize: '16px', margin: '0' }}>
+                Total Eco Points:
+              </p>
+              <strong style={{ 
+                color: totalScore >= 0 ? '#27ae60' : '#e74c3c', 
+                fontSize: '24px',
+                display: 'block',
+                marginTop: '5px'
+              }}>
+                {totalScore}
+              </strong>
+            </div>
+            <div>
+              <p style={{ color: '#7f8c8d', fontSize: '16px', margin: '0' }}>
+                Total Carbon:
+              </p>
+              <strong style={{ 
+                color: carbonData.total >= 0 ? '#e74c3c' : '#27ae60', 
+                fontSize: '24px',
+                display: 'block',
+                marginTop: '5px'
+              }}>
+                {carbonData.total >= 0 ? '+' : ''}{carbonData.total} kg CO₂e
+              </strong>
+            </div>
+            <div>
+              <p style={{ color: '#7f8c8d', fontSize: '16px', margin: '0' }}>
+                Today's Carbon:
+              </p>
+              <strong style={{ 
+                color: carbonData.daily >= 0 ? '#e74c3c' : '#27ae60', 
+                fontSize: '24px',
+                display: 'block',
+                marginTop: '5px'
+              }}>
+                {carbonData.daily >= 0 ? '+' : ''}{carbonData.daily} kg CO₂e
+              </strong>
+            </div>
           </div>
+        </div>
 
           {/* Pinned and Frequent Activities */}
           <PinnedFrequentActivities 

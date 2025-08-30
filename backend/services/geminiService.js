@@ -124,6 +124,9 @@ class GeminiService {
     const positiveActivities = activities.filter(a => a.points > 0);
     const negativeActivities = activities.filter(a => a.points < 0);
     const totalScore = activities.reduce((sum, a) => sum + a.points, 0);
+    
+    // Calculate total carbon emissions
+    const totalCarbon = activities.reduce((sum, a) => sum + (a.carbonEmission || 0), 0);
 
     return `
       Analyze this user's environmental activities and provide recommendations:
@@ -133,7 +136,8 @@ class GeminiService {
       - Positive activities: ${positiveActivities.length}
       - Negative activities: ${negativeActivities.length}
       - Total eco-score: ${totalScore}
-      
+      - Net carbon impact: ${totalCarbon.toFixed(2)} kg CO₂e
+
       ACTIVITIES BY CATEGORY:
       ${Object.entries(activitiesByCategory).map(([category, acts]) => `
         ${category}: ${acts.length} activities
@@ -141,7 +145,7 @@ class GeminiService {
 
       RECENT ACTIVITIES (last 10):
       ${activities.slice(0, 10).map(a => `
-        - ${a.activityName} (${a.points} points, ${a.category})
+        - ${a.activityName} (${a.points} points, ${a.category}, ${a.carbonEmission >= 0 ? '+' : ''}${a.carbonEmission.toFixed(2)} kg CO₂e)
       `).join('')}
 
       Please provide:
@@ -191,26 +195,27 @@ class GeminiService {
 
     return result;
   }
+  
   getCacheStatus(userId) {
-  const cacheKey = `recommendations:${userId}`;
-  const cachedData = recommendationCache.get(cacheKey);
-  
-  if (!cachedData) {
-    return { 
-      hasCache: false,
-      message: 'No cached recommendations found for this user'
+    const cacheKey = `recommendations:${userId}`;
+    const cachedData = recommendationCache.get(cacheKey);
+    
+    if (!cachedData) {
+      return { 
+        hasCache: false,
+        message: 'No cached recommendations found for this user'
+      };
+    }
+    
+    const ageInMinutes = Math.floor((Date.now() - cachedData.timestamp) / (60 * 1000));
+    const expiresInMinutes = 60 - ageInMinutes;
+    
+    return {
+      hasCache: true,
+      cacheAge: `${ageInMinutes} minutes`,
+      expiresIn: `${expiresInMinutes} minutes`,
+      willRefresh: expiresInMinutes <= 0
     };
-  }
-  
-  const ageInMinutes = Math.floor((Date.now() - cachedData.timestamp) / (60 * 1000));
-  const expiresInMinutes = 60 - ageInMinutes;
-  
-  return {
-    hasCache: true,
-    cacheAge: `${ageInMinutes} minutes`,
-    expiresIn: `${expiresInMinutes} minutes`,
-    willRefresh: expiresInMinutes <= 0
-  };
   } 
 }
 
