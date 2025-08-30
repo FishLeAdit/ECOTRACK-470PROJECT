@@ -142,9 +142,10 @@ app.get('/api/activities/:userId/frequent', async (req, res) => {
 });
 
 // POST: add a new activity
+// POST: add a new activity
 app.post('/api/activities', async (req, res) => {
   try {
-    // Merged to include 'emoji' from the second file
+    console.log('➕ Adding new activity:', req.body);
     const { userId, activityName, points, category, type, emoji } = req.body;
     if (!activityName || points === undefined || points === null) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -154,15 +155,21 @@ app.post('/api/activities', async (req, res) => {
       userId,
       activityName,
       points,
-      category,
+      category: category || 'General',
       type,
-      emoji: emoji || '', // Ensure emoji has a value
+      emoji: emoji || '',
       date: new Date()
     });
+    
+    console.log('💾 Saving activity to database...');
     await newActivity.save();
+    console.log('✅ Activity saved successfully');
 
-    // Check for new badges
-    const newBadges = await BadgeService.checkAndAwardBadges(userId);
+    // Update user stats and check for new badges
+    console.log('🔄 Updating user stats...');
+    const { userStats, newBadges } = await BadgeService.updateUserStats(userId, newActivity);
+    console.log(`🎯 New badges found: ${newBadges.length}`);
+    
     res.status(201).json({ activity: newActivity, newBadges });
   } catch (err) {
     console.error('❌ Error creating activity:', err);
@@ -287,6 +294,7 @@ const refreshGoalsAutomatically = async (userId) => {
 };
 
 // POST: Create a new goal
+// POST: Create a new goal
 app.post('/api/goals', async (req, res) => {
   try {
     console.log('🎯 Creating new goal:', req.body);
@@ -306,7 +314,10 @@ app.post('/api/goals', async (req, res) => {
     });
     
     await goal.save();
+    
+    // Update stats and check for badges on goal creation
     const { newBadges } = await BadgeService.updateStatsOnGoalCreation(userId);
+    
     console.log('✅ Goal created successfully with badges check');
     res.status(201).json({ goal, newBadges: newBadges || [] });
   } catch (err) {
@@ -391,6 +402,8 @@ app.put('/api/goals/:id/archive', async (req, res) => {
 });
 
 // --- BADGE, STATS, & LEADERBOARD ROUTES ---
+
+// --- BADGE ROUTES ---
 
 // GET: User badges
 app.get('/api/badges/:userId', async (req, res) => {

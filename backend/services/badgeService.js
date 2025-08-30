@@ -201,6 +201,7 @@ class BadgeService {
       let userStats = await UserStats.findOne({ userId });
       
       if (!userStats) {
+        console.log(`📝 Creating new stats for user: ${userId}`)
         userStats = new UserStats({ userId });
       }
       
@@ -268,7 +269,10 @@ class BadgeService {
   }
   
   // Check and award eligible badges
-  static async checkAndAwardBadges(userId, userStats) {
+  static async checkAndAwardBadges(userId, userStats = null) {
+    if (!userStats) {
+      userStats = await this.getUserStats(userId);
+    }
     const newBadges = [];
     
     for (const [badgeId, badgeDefinition] of Object.entries(BADGE_DEFINITIONS)) {
